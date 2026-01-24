@@ -31,13 +31,23 @@
 OpenRouter는 LiteLLM provider로 호출됩니다.
 
 - **모델 표기 규칙**: `openrouter/<provider>/<model>` 형태
-- **API 키 설정(환경변수 권장)**:
+- **API 키 설정(.env 권장)**:
+
+가장 간단한 방식은 `.env.example`을 복사해서 `.env`를 만들고, 쉘에 로드하는 것입니다.
+
+```bash
+cp .env.example .env
+# .env에 OPENROUTER_API_KEY를 채운 뒤
+set -a
+source .env
+set +a
+```
 
 ```bash
 export OPENROUTER_API_KEY="YOUR_KEY"
 ```
 
-키는 절대 커밋하지 마세요. (업스트림 `tau2-bench/.env.example`은 참고용 템플릿입니다.)
+키는 절대 커밋하지 마세요. (`.gitignore`에 `.env`가 포함되어 있습니다.)
 
 ## 평가 대상 모델(요청하신 5개)
 
