@@ -85,6 +85,14 @@ export OPENROUTER_API_KEY="YOUR_KEY"
 ./run_evaluation.sh
 ```
 
+OpenRouter에서 503/429 같은 일시 오류가 잦으면, 호출 간 딜레이를 줄 수 있습니다(기본 1초).
+
+```bash
+cd tau2-bench
+export OPENROUTER_API_KEY="YOUR_KEY"
+DELAY_SEC=1 ./run_evaluation.sh
+```
+
 ## 엑셀 리포트(요약)
 
 `tau2-bench/generate_excel_report.py`는 결과 JSON을 읽어 `tau2_evaluation_report.xlsx`를 생성합니다.

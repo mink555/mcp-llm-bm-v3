@@ -15,6 +15,9 @@ MODELS=(
 DOMAINS=("retail" "airline" "telecom")
 NUM_TRIALS=4
 TEMP=0.0
+# OpenRouter API 안정화를 위한 호출 간 딜레이(초). 기본 1초.
+# 필요하면 실행 시 `DELAY_SEC=0` 또는 `DELAY_SEC=2`처럼 조절.
+DELAY_SEC="${DELAY_SEC:-1}"
 
 sanitize_model_name() {
     echo "$1" | sed 's/openrouter\///' | sed 's/\//_/g' | sed 's/:/_/g'
@@ -44,6 +47,11 @@ for model in "${MODELS[@]}"; do
             --save-to "${sanitized}_${domain}" \
             --max-concurrency 3 \
             --log-level ERROR
+
+        # provider rate-limit/용량 이슈 완화용
+        if [ "$DELAY_SEC" != "0" ]; then
+            sleep "$DELAY_SEC"
+        fi
     done
     
     # Generate intermediate report
