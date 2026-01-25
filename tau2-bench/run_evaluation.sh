@@ -4,6 +4,24 @@
 
 set -e
 
+# API 키가 없으면 .env에서 로드(옵션)
+# - 우선순위: 환경변수(이미 설정됨) > tau2-bench/.env > repo 루트 ../.env
+if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+    for ENV_FILE in ".env" "../.env" ".env.local" "../.env.local"; do
+        if [ -f "$ENV_FILE" ]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$ENV_FILE"
+            set +a
+            break
+        fi
+    done
+fi
+
+if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+    echo "[WARN] OPENROUTER_API_KEY is not set. OpenRouter calls will fail unless the key is provided."
+fi
+
 MODELS=(
     "openrouter/meta-llama/llama-3.3-70b-instruct"
     "openrouter/mistralai/mistral-small-3.2-24b-instruct"
