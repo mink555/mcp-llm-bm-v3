@@ -94,6 +94,106 @@ def _summarize_model(tool_names: str, agent_final: str) -> str:
         parts.append(f"- 최종응답: {final_short}")
     return "\n".join(parts)
 
+def _fmt_kv_call(name: str, args: dict | None) -> str:
+    try:
+        a = json.dumps(args or {}, ensure_ascii=False)
+    except Exception:
+        a = str(args)
+    return f"{name}({a})"
+
+
+def _extract_failed_env_assertions(reward_info: dict) -> list[str]:
+    out: list[str] = []
+    for item in (reward_info or {}).get("env_assertions") or []:
+        if not isinstance(item, dict):
+            continue
+        met = item.get("met")
+        env_a = item.get("env_assertion") or {}
+        if met is False and isinstance(env_a, dict):
+            fn = env_a.get("func_name") or "unknown_assertion"
+            args = env_a.get("arguments") or {}
+            out.append(_fmt_kv_call(fn, args) + " 미충족")
+    return out
+
+
+def _extract_action_mismatches(reward_info: dict) -> list[str]:
+    out: list[str] = []
+    for item in (reward_info or {}).get("action_checks") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("action_match") is False:
+            act = item.get("action") or {}
+            if isinstance(act, dict):
+                name = act.get("name") or "unknown_action"
+                args = act.get("arguments") or {}
+                out.append(_fmt_kv_call(name, args) + " 불일치")
+    return out
+
+
+def _make_fail_reason(
+    *,
+    pass_flag: int,
+    termination: str,
+    required_tools: list[str],
+    called_tools: list[str],
+    missing_tools: list[str],
+    failed_env_assertions: list[str],
+    action_mismatches: list[str],
+    tool_args_err_cnt: int,
+    tool_args_err_summary: str,
+) -> tuple[str, str, str]:
+    """
+    반환: (실패분류, 한줄, 상세)
+    - PASS면 분류/사유는 간단히
+    """
+    termination = termination or "n/a"
+    req = ", ".join(required_tools) if required_tools else "(없음)"
+    called = ", ".join(called_tools) if called_tools else "(없음)"
+    miss = ", ".join(missing_tools) if missing_tools else "(없음)"
+    env_fail = "; ".join(failed_env_assertions) if failed_env_assertions else "(없음)"
+    act_fail = "; ".join(action_mismatches) if action_mismatches else "(없음)"
+
+    if pass_flag == 1:
+        return "-", "PASS: reward=1.0", "PASS: 필수 액션/환경 assertion 체크를 모두 통과"
+
+    # 분류
+    tag = "Unknown"
+    if tool_args_err_cnt > 0:
+        tag = "Tool misuse / Schema mismatch"
+    elif missing_tools:
+        tag = "Tool misuse / Missing required actions"
+    elif failed_env_assertions:
+        tag = "Reasoning/Planning / Env assertion failed"
+    elif "too_many_errors" in termination:
+        tag = "Infra/API / Too many errors"
+    elif "max_steps" in termination or "max_turns" in termination:
+        tag = "Loop/timeout / Max steps"
+
+    # 한 줄
+    one = f"FAIL: 종료={termination} / 필수툴={req} / 호출툴={called}"
+    extras = []
+    if missing_tools:
+        extras.append(f"누락툴={miss}")
+    if failed_env_assertions:
+        extras.append(f"깨진 assertion {len(failed_env_assertions)}개")
+    if tool_args_err_cnt > 0:
+        extras.append(f"tool args JSON 오류 {tool_args_err_cnt}건")
+    if extras:
+        one += " / " + " / ".join(extras)
+
+    # 상세(체크리스트)
+    detail_lines = [
+        f"- 종료사유: {termination}",
+        f"- 필수 툴(GT): {req}",
+        f"- 호출된 툴(모델): {called}",
+        f"- 누락된 툴: {miss}",
+        f"- action_checks 불일치: {act_fail}",
+        f"- env_assertions 실패: {env_fail}",
+    ]
+    if tool_args_err_cnt > 0:
+        detail_lines.append(f"- tool args JSON 파싱 오류: {tool_args_err_summary}")
+    return tag, one, "\n".join(detail_lines)
+
 def setup_styles():
     """가독성 중심(최소 색상, 엑셀 기본 톤) 스타일."""
     grid = "D9D9D9"
@@ -684,20 +784,20 @@ def create_runs_sheet(wb, runs, styles):
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 32
 
-    # 가독성 중심(요약 컬럼) + 원문은 숨김
+    # "원본 중심" + 실패 사유를 바로 읽히게
     headers = [
         "RunID", "모델", "도메인", "TaskID", "Trial",
-        "결과", "Reward", "실패분류(L1/L2)",
-        "요청(요약)", "GT(요약)", "모델 결과(요약)", "왜 맞/틀(근거)"
+        "결과", "Reward", "종료사유",
+        "요청(원문: 시나리오 JSON)", "GT(원문 JSON)", "모델 tool_calls(원문)",
+        "툴결과(원문)", "모델 최종응답(원문)",
+        "왜 맞/틀(한줄)", "왜 맞/틀(상세)",
+        "필수툴(GT)", "호출툴(모델)", "누락툴",
+        "깨진 env_assertions", "action_checks 불일치",
+        "실패분류(L1/L2)"
     ]
     hidden_headers = [
-        "요청(원문 JSON)",
-        "GT(원문 JSON)",
-        "모델 최종응답(원문)",
-        "모델 tool_calls(원문)",
-        "툴응답(원문)",
+        "사용자 첫 발화(원문)",
         "RewardBreakdown(JSON)",
-        "ActionChecks(JSON)",
         "ToolArgsJSONErrorCount",
         "ToolArgsJSONErrorSummary",
         "ToolArgsJSONErrors(JSON)",
@@ -714,48 +814,30 @@ def create_runs_sheet(wb, runs, styles):
         rb = run.get("RewardBreakdown") or {}
         tool_args_err_cnt = int(run.get("ToolArgsJSONErrorCount") or 0)
         tool_args_err_summary = run.get("ToolArgsJSONErrorSummary") or ""
-        fail_tag = "-"
-        # 근거
-        if run.get("Pass") == 1:
-            why = "reward=1.0 (필수 액션/DB/커뮤니케이션 체크 통과)"
-            fail_tag = "-"
-        else:
-            parts = []
-            term = str(run.get("Termination") or "")
-            if "too_many_errors" in term:
-                parts.append("too_many_errors(오류 누적 종료)")
-            if run.get("MissingRequiredActions"):
-                parts.append(f"필수 액션 미충족: {run['MissingRequiredActions']}")
-            if run.get("ActionMismatchCount") is not None and run.get("ActionMismatchCount") > 0:
-                parts.append(f"action_checks 불일치 {run['ActionMismatchCount']}건")
-            if tool_args_err_cnt > 0:
-                parts.append(f"tool args JSON 파싱 실패 {tool_args_err_cnt}건")
-            if not parts:
-                parts.append(f"breakdown={rb}")
-            why = " / ".join(parts)
-
-            # 실패분류(L1/L2): tool args JSON 깨짐은 schema mismatch로 우선 태깅
-            if tool_args_err_cnt > 0:
-                fail_tag = "Tool misuse / Schema mismatch"
-            elif "too_many_errors" in term:
-                fail_tag = "Infra/API / Too many errors"
-            elif "max_turns" in term:
-                fail_tag = "Loop/timeout / Max turns"
-            else:
-                if rb.get("ACTION") == 0.0:
-                    fail_tag = "Tool misuse / Missing required actions"
-                elif rb.get("DB") == 0.0:
-                    fail_tag = "Reasoning/Planning / DB mismatch"
-                elif rb.get("COMMUNICATE") == 0.0:
-                    fail_tag = "Missing info / Communication"
-                else:
-                    fail_tag = "Unknown"
-
-        req_raw = run.get("UserRequestRaw","")
+        term = str(run.get("Termination") or "")
+        req_raw = run.get("UserScenarioRaw","") or run.get("UserRequestRaw","")
+        first_user_raw = run.get("UserFirstUtterance","")
         gt_raw = run.get("GTRaw","")
         agent_final_raw = run.get("AgentFinalRaw","")
         tool_calls_raw = run.get("ToolCallsRaw","")
         tool_results_raw = run.get("ToolResultsRaw","")
+        required_tools = run.get("RequiredTools") or []
+        called_tools = run.get("CalledTools") or []
+        missing_tools = run.get("MissingTools") or []
+        failed_env_assertions = run.get("FailedEnvAssertions") or []
+        action_mismatches = run.get("ActionMismatches") or []
+
+        fail_tag, why_one, why_detail = _make_fail_reason(
+            pass_flag=int(run.get("Pass") or 0),
+            termination=term,
+            required_tools=required_tools,
+            called_tools=called_tools,
+            missing_tools=missing_tools,
+            failed_env_assertions=failed_env_assertions,
+            action_mismatches=action_mismatches,
+            tool_args_err_cnt=tool_args_err_cnt,
+            tool_args_err_summary=tool_args_err_summary,
+        )
 
         row = [
             run.get("RunID",""),
@@ -765,19 +847,23 @@ def create_runs_sheet(wb, runs, styles):
             run.get("Trial",0),
             "PASS" if run.get("Pass")==1 else "FAIL",
             run.get("Reward",0.0),
-            fail_tag,
-            _summarize_request(req_raw),
-            _summarize_gt(gt_raw),
-            _summarize_model(run.get("ToolNames",""), agent_final_raw),
-            why,
-            # hidden originals
+            term,
             req_raw,
             gt_raw,
-            agent_final_raw,
             tool_calls_raw,
             tool_results_raw,
+            agent_final_raw,
+            why_one,
+            why_detail,
+            ", ".join(required_tools) if required_tools else "",
+            ", ".join(called_tools) if called_tools else "",
+            ", ".join(missing_tools) if missing_tools else "",
+            "\n".join(failed_env_assertions) if failed_env_assertions else "",
+            "\n".join(action_mismatches) if action_mismatches else "",
+            fail_tag,
+            # hidden
+            first_user_raw,
             run.get("RewardBreakdownJSON",""),
-            run.get("ActionChecksRaw",""),
             run.get("ToolArgsJSONErrorCount", 0),
             tool_args_err_summary,
             run.get("ToolArgsJSONErrorsRaw", ""),
@@ -788,7 +874,7 @@ def create_runs_sheet(wb, runs, styles):
         for col_idx in range(1, len(headers) + len(hidden_headers) + 1):
             cell = ws.cell(r, col_idx)
             cell.border = styles["data"]["border"]
-            if col_idx in [5,6,7]:
+            if col_idx in [5,6,7,8]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
@@ -805,17 +891,19 @@ def create_runs_sheet(wb, runs, styles):
 
     # Column widths (간결)
     widths = {
-        "A":34, "B":24, "C":10, "D":8, "E":6,
-        "F":7, "G":8, "H":26,
-        "I":46, "J":28, "K":52, "L":36,
-        # hidden columns widths (kept reasonable)
-        "M":48, "N":44, "O":52, "P":44, "Q":44,
-        "R":28, "S":28, "T":10, "U":34, "V":44
+        "A":34, "B":24, "C":10, "D":10, "E":6,
+        "F":7, "G":8, "H":12,
+        "I":56, "J":54, "K":54,
+        "L":54, "M":54, "N":54,
+        "O":34, "P":28, "Q":28,
+        "R":34, "S":34, "T":26,
+        # hidden
+        "U":44, "V":28, "W":10, "X":34, "Y":44
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
     # 숨김 컬럼
-    for col_letter in ["M","N","O","P","Q","R","S","T","U","V"]:
+    for col_letter in ["U","V","W","X","Y"]:
         ws.column_dimensions[col_letter].hidden = True
     return ws
 
@@ -1361,14 +1449,21 @@ def generate_report(
             tid = str(t.get("id"))
             crit = (t.get("evaluation_criteria") or {})
             actions = crit.get("actions") or []
-            # 원본 GT: actions 전체(이름+args 포함)
-            gt_raw = json.dumps(actions, ensure_ascii=False)
+            # 원본 GT: actions + env_assertions(원문 그대로)
+            gt_raw = json.dumps(
+                {
+                    "actions": actions,
+                    "env_assertions": (crit.get("env_assertions") or []),
+                },
+                ensure_ascii=False,
+            )
             req_tools = [a.get("name") for a in actions if a.get("name")]
             if req_tools:
                 gt_map[(domain, tid)] = "required_tools: " + ", ".join(req_tools)
             task_meta[(domain, tid)] = {
                 "gt_raw": gt_raw,
                 "user_scenario_raw": json.dumps(((t.get("user_scenario") or {}).get("instructions") or {}), ensure_ascii=False),
+                "ticket": (t.get("ticket") or ""),
             }
 
         for sim in data.get("simulations", []) or []:
@@ -1388,6 +1483,9 @@ def generate_report(
             reward_info = sim.get("reward_info") or {}
             reward_breakdown = reward_info.get("reward_breakdown") or {}
             action_checks = reward_info.get("action_checks") or []
+            # 실패 원인(원문 기반)
+            failed_env_assertions = _extract_failed_env_assertions(reward_info)
+            action_mismatches = _extract_action_mismatches(reward_info)
 
             # TAU2 success 기준: reward가 1.0(±1e-6)
             is_pass = 1 if abs(float(reward) - 1.0) <= 1e-6 else 0
@@ -1477,9 +1575,23 @@ def generate_report(
                 )
 
             meta = task_meta.get((domain, str(task_id)), {})
-            user_request_raw = first_user or meta.get("user_scenario_raw", "")
+            # 요청(원문)은 "시나리오 instructions JSON"을 기본으로 사용(첫 발화는 별도 컬럼으로)
+            user_scenario_raw = meta.get("user_scenario_raw", "")
+            user_request_raw = user_scenario_raw or first_user
             gt_raw = meta.get("gt_raw", "")
             gt_summary = gt_map.get((domain, str(task_id)), "N/A")
+            # 필수 툴 리스트(GT)
+            required_tools: list[str] = []
+            try:
+                gt_obj = json.loads(gt_raw) if gt_raw else {}
+                if isinstance(gt_obj, dict):
+                    for a in (gt_obj.get("actions") or []):
+                        if isinstance(a, dict) and a.get("name"):
+                            required_tools.append(a["name"])
+            except Exception:
+                required_tools = []
+            called_tools = sorted({n for n in tool_names if n})
+            missing_tools = sorted(set(required_tools) - set(called_tools))
 
             # 실패 근거(필수 액션 미충족 등) 계산
             mismatches = [a for a in action_checks if a and (a.get("action_match") is False)]
@@ -1510,12 +1622,19 @@ def generate_report(
                     "ToolCallsRaw": json.dumps(tool_calls_raw_all, ensure_ascii=False),
                     "ToolResultsRaw": "\n\n---\n\n".join(tool_results_raw_all),
                     "UserRequestRaw": user_request_raw,
+                    "UserScenarioRaw": user_scenario_raw,
+                    "UserFirstUtterance": first_user,
                     "GTRaw": gt_raw,
                     "GTSummary": gt_summary,
                     "AgentFinalRaw": agent_final,
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,
                     "MissingRequiredActions": missing_actions_str,
+                    "RequiredTools": sorted(set(required_tools)),
+                    "CalledTools": called_tools,
+                    "MissingTools": missing_tools,
+                    "FailedEnvAssertions": failed_env_assertions,
+                    "ActionMismatches": action_mismatches,
                     "ToolArgsJSONErrorCount": tool_args_err_cnt,
                     "ToolArgsJSONErrorSummary": tool_args_err_summary,
                     "ToolArgsJSONErrorsRaw": tool_args_errs_raw,
