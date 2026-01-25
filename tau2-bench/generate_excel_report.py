@@ -28,6 +28,72 @@ except ImportError:
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
+def _safe_json_loads(s: str) -> dict:
+    try:
+        return json.loads(s)
+    except Exception:
+        return {}
+
+
+def _summarize_request(user_request_raw: str) -> str:
+    """
+    요청(원문 JSON)에서 핵심만 추출해서 한 셀에 보기 좋게 요약.
+    기대 포맷: {reason_for_call, known_info, task_instructions, ...}
+    """
+    d = _safe_json_loads(user_request_raw or "")
+    reason = (d.get("reason_for_call") or "").strip()
+    known = (d.get("known_info") or "").strip()
+    instr = (d.get("task_instructions") or "").strip()
+    # task_instructions는 길어지므로 첫 1~2줄만
+    instr_short = ""
+    if instr:
+        lines = [ln.strip() for ln in instr.splitlines() if ln.strip()]
+        instr_short = " / ".join(lines[:2])
+        if len(lines) > 2:
+            instr_short += " ..."
+    parts = []
+    if reason:
+        parts.append(f"- 문제: {reason}")
+    if known:
+        parts.append(f"- 정보: {known}")
+    if instr_short:
+        parts.append(f"- 조건: {instr_short}")
+    return "\n".join(parts) if parts else (user_request_raw or "")
+
+
+def _summarize_gt(gt_raw: str) -> str:
+    """
+    GT(원문/필수액션)에서 '필수 툴'과 '환경 assertions'를 요약.
+    """
+    actions = []
+    asserts = []
+    # 현재 gt_raw는 actions 리스트(JSON 문자열)로 저장됨
+    d = _safe_json_loads(gt_raw or "")
+    if isinstance(d, list):
+        actions = [a.get("name") for a in d if isinstance(a, dict) and a.get("name")]
+        for a in d:
+            pass
+    # env_assertions는 task_meta에 없어서(현재 저장 형태) GT 원문 전체는 숨김 컬럼에서 보게 유도
+    if actions:
+        return "필수 툴: " + ", ".join(sorted(set(actions)))
+    return gt_raw or ""
+
+
+def _summarize_model(tool_names: str, agent_final: str) -> str:
+    """
+    모델 결과(툴/최종응답)를 한 셀에 보기 좋게 요약.
+    """
+    tools = (tool_names or "").strip()
+    final = (agent_final or "").strip()
+    final_short = final
+    if len(final_short) > 240:
+        final_short = final_short[:240] + "..."
+    parts = []
+    parts.append(f"- 툴: {tools if tools else '(없음)'}")
+    if final_short:
+        parts.append(f"- 최종응답: {final_short}")
+    return "\n".join(parts)
+
 def setup_styles():
     """가독성 중심(최소 색상, 엑셀 기본 톤) 스타일."""
     grid = "D9D9D9"
@@ -618,17 +684,18 @@ def create_runs_sheet(wb, runs, styles):
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 32
 
+    # 가독성 중심(요약 컬럼) + 원문은 숨김
     headers = [
         "RunID", "모델", "도메인", "TaskID", "Trial",
-        "결과", "Reward", "툴호출수", "툴목록",
-        "요청(원문)", "GT(원문 JSON)", "모델 최종응답(원문)", "모델 tool_calls(원문)", "왜 맞/틀"
+        "결과", "Reward", "실패분류(L1/L2)",
+        "요청(요약)", "GT(요약)", "모델 결과(요약)", "왜 맞/틀(근거)"
     ]
-    # taxonomy (최소 1컬럼만 노출)
-    headers.append("실패분류(L1/L2)")
-    # 숨김(원본) 컬럼들(오른쪽)
     hidden_headers = [
-        "툴응답(원문)",
+        "요청(원문 JSON)",
         "GT(원문 JSON)",
+        "모델 최종응답(원문)",
+        "모델 tool_calls(원문)",
+        "툴응답(원문)",
         "RewardBreakdown(JSON)",
         "ActionChecks(JSON)",
         "ToolArgsJSONErrorCount",
@@ -684,6 +751,12 @@ def create_runs_sheet(wb, runs, styles):
                 else:
                     fail_tag = "Unknown"
 
+        req_raw = run.get("UserRequestRaw","")
+        gt_raw = run.get("GTRaw","")
+        agent_final_raw = run.get("AgentFinalRaw","")
+        tool_calls_raw = run.get("ToolCallsRaw","")
+        tool_results_raw = run.get("ToolResultsRaw","")
+
         row = [
             run.get("RunID",""),
             run.get("ModelLabel",""),
@@ -692,17 +765,17 @@ def create_runs_sheet(wb, runs, styles):
             run.get("Trial",0),
             "PASS" if run.get("Pass")==1 else "FAIL",
             run.get("Reward",0.0),
-            run.get("ToolCallCount",0),
-            run.get("ToolNames",""),
-            run.get("UserRequestRaw",""),
-            run.get("GTRaw",""),
-            run.get("AgentFinalRaw",""),
-            run.get("ToolCallsRaw",""),
-            why,
             fail_tag,
+            _summarize_request(req_raw),
+            _summarize_gt(gt_raw),
+            _summarize_model(run.get("ToolNames",""), agent_final_raw),
+            why,
             # hidden originals
-            run.get("ToolResultsRaw",""),
-            run.get("GTRaw",""),
+            req_raw,
+            gt_raw,
+            agent_final_raw,
+            tool_calls_raw,
+            tool_results_raw,
             run.get("RewardBreakdownJSON",""),
             run.get("ActionChecksRaw",""),
             run.get("ToolArgsJSONErrorCount", 0),
@@ -715,7 +788,7 @@ def create_runs_sheet(wb, runs, styles):
         for col_idx in range(1, len(headers) + len(hidden_headers) + 1):
             cell = ws.cell(r, col_idx)
             cell.border = styles["data"]["border"]
-            if col_idx in [5,6,7,8]:
+            if col_idx in [5,6,7]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
@@ -725,23 +798,24 @@ def create_runs_sheet(wb, runs, styles):
             rc.fill = styles["pass"]["fill"]; rc.font = styles["pass"]["font"]
         else:
             rc.fill = styles["fail"]["fill"]; rc.font = styles["fail"]["font"]
-        ws.row_dimensions[r].height = 68
+        ws.row_dimensions[r].height = 110
 
     ws.freeze_panes = f"A{hrow+1}"
     ws.auto_filter.ref = f"A{hrow}:{get_column_letter(len(headers)+len(hidden_headers))}{ws.max_row}"
 
     # Column widths (간결)
     widths = {
-        "A":34, "B":26, "C":10, "D":8, "E":6,
-        "F":7, "G":8, "H":8, "I":20,
-        "J":50, "K":40, "L":50, "M":38, "N":34,
-        "O":44, "P":44, "Q":44, "R":26, "S":26,
-        "T":10, "U":34, "V":44
+        "A":34, "B":24, "C":10, "D":8, "E":6,
+        "F":7, "G":8, "H":26,
+        "I":46, "J":28, "K":52, "L":36,
+        # hidden columns widths (kept reasonable)
+        "M":48, "N":44, "O":52, "P":44, "Q":44,
+        "R":28, "S":28, "T":10, "U":34, "V":44
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
     # 숨김 컬럼
-    for col_letter in ["O","P","Q","R","S","T","U","V"]:
+    for col_letter in ["M","N","O","P","Q","R","S","T","U","V"]:
         ws.column_dimensions[col_letter].hidden = True
     return ws
 
@@ -1230,7 +1304,13 @@ def _find_default_base_dir() -> Path | None:
     return next((d for d in base_dirs if d.exists()), None)
 
 
-def generate_report(*, output_path: Path, model_filter: str | None = None, base_dir: Path | None = None) -> None:
+def generate_report(
+    *,
+    output_path: Path,
+    model_filter: str | None = None,
+    base_dir: Path | None = None,
+    models_mapping_override: dict[str, str] | None = None,
+) -> None:
     """
     리포트 생성 엔트리포인트(재사용 가능).
     - output_path: 저장할 xlsx 경로
@@ -1242,7 +1322,7 @@ def generate_report(*, output_path: Path, model_filter: str | None = None, base_
         raise RuntimeError("Results directory not found. (expected data/simulations or data/tau2/simulations)")
 
     # 모델 매핑은 {llm_string: label} 형태로 유지
-    models_mapping = dict(LLM_TO_LABEL)
+    models_mapping = dict(models_mapping_override or LLM_TO_LABEL)
     if model_filter:
         models_mapping = {k: v for k, v in models_mapping.items() if k == model_filter}
 
