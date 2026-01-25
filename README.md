@@ -257,6 +257,23 @@ export OPENROUTER_API_KEY="YOUR_KEY"
 - **툴콜이 text로만 나오면** `tool_calls`가 비어 있어 **FAIL**로 찍히는 게 정상입니다.  
 - 따라서 **OpenRouter provider 라우팅이 툴콜 품질에 큰 영향**을 줍니다.
 
+### 모델별 provider 고정(권장)
+아래는 **tool_calls가 구조화로 잘 들어오는 provider**를 빠르게 확인한 결과입니다.  
+이 값을 `OPENROUTER_PROVIDER_MAP`으로 고정하면 **유효성 오류 없이 모델 실력 비교**가 가능합니다.
+
+```bash
+cd tau2-bench
+export OPENROUTER_PROVIDER_MAP='{
+  "openrouter/meta-llama/llama-3.3-70b-instruct": ["Inceptron"],
+  "openrouter/mistralai/mistral-small-3.2-24b-instruct": ["Mistral"],
+  "openrouter/qwen/qwen3-32b": ["Chutes"],
+  "openrouter/qwen/qwen3-14b": ["Chutes"],
+  "openrouter/qwen/qwen3-next-80b-a3b-instruct": ["DeepInfra"]
+}'
+export OPENROUTER_ALLOW_FALLBACKS=0
+./run_evaluation.sh
+```
+
 ## 평가 대상 모델(요청하신 5개)
 
 - `openrouter/meta-llama/llama-3.3-70b-instruct`

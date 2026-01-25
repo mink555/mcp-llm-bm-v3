@@ -48,6 +48,13 @@ MAX_TOKENS="${MAX_TOKENS:-4096}"
 # 필요하면 OPENROUTER_ALLOW_FALLBACKS=0 으로 폴백 금지
 OPENROUTER_PROVIDER_ORDER="${OPENROUTER_PROVIDER_ORDER:-}"
 OPENROUTER_ALLOW_FALLBACKS="${OPENROUTER_ALLOW_FALLBACKS:-true}"
+# 모델별 provider 고정(옵션, JSON)
+# 예:
+# OPENROUTER_PROVIDER_MAP='{
+#   "openrouter/mistralai/mistral-small-3.2-24b-instruct": ["Mistral"],
+#   "openrouter/qwen/qwen3-32b": ["Fireworks","DeepInfra"]
+# }'
+OPENROUTER_PROVIDER_MAP="${OPENROUTER_PROVIDER_MAP:-{}}"
 # OpenRouter API 안정화를 위한 호출 간 딜레이(초). 기본 1초.
 # 필요하면 실행 시 `DELAY_SEC=0` 또는 `DELAY_SEC=2`처럼 조절.
 DELAY_SEC="${DELAY_SEC:-1}"
@@ -80,7 +87,7 @@ PY
 }
 
 build_llm_args() {
-    # shell vars -> json
+    # shell vars -> json (global provider order)
     TEMP_ENV="$TEMP" MAX_TOKENS_ENV="$MAX_TOKENS" OPENROUTER_PROVIDER_ORDER_ENV="$OPENROUTER_PROVIDER_ORDER" OPENROUTER_ALLOW_FALLBACKS_ENV="$OPENROUTER_ALLOW_FALLBACKS" \
     python3 - <<'PY'
 import json, os
@@ -95,6 +102,33 @@ if order:
         "order": [o.strip() for o in order.split(",") if o.strip()],
         "allow_fallbacks": allow,
     }
+print(json.dumps(args))
+PY
+}
+
+build_llm_args_for_model() {
+    # shell vars -> json (per-model provider map 우선)
+    MODEL_ENV="$1" TEMP_ENV="$TEMP" MAX_TOKENS_ENV="$MAX_TOKENS" OPENROUTER_PROVIDER_MAP_ENV="$OPENROUTER_PROVIDER_MAP" OPENROUTER_PROVIDER_ORDER_ENV="$OPENROUTER_PROVIDER_ORDER" OPENROUTER_ALLOW_FALLBACKS_ENV="$OPENROUTER_ALLOW_FALLBACKS" \
+    python3 - <<'PY'
+import json, os
+args = {
+    "temperature": float(os.environ["TEMP_ENV"]),
+    "max_tokens": int(os.environ["MAX_TOKENS_ENV"]),
+}
+model = os.environ["MODEL_ENV"]
+allow = os.environ.get("OPENROUTER_ALLOW_FALLBACKS_ENV", "true").lower() not in ("0","false","no")
+provider_map_raw = os.environ.get("OPENROUTER_PROVIDER_MAP_ENV", "{}")
+try:
+    provider_map = json.loads(provider_map_raw)
+except Exception:
+    provider_map = {}
+order = provider_map.get(model)
+if order:
+    args["provider"] = {"order": order, "allow_fallbacks": allow}
+else:
+    order_str = os.environ.get("OPENROUTER_PROVIDER_ORDER_ENV", "").strip()
+    if order_str:
+        args["provider"] = {"order": [o.strip() for o in order_str.split(",") if o.strip()], "allow_fallbacks": allow}
 print(json.dumps(args))
 PY
 }
@@ -134,7 +168,7 @@ for model in "${MODELS[@]}"; do
         fi
 
         # LLM args 구성(temperature + max_tokens + provider routing)
-        AGENT_ARGS="$(build_llm_args)"
+        AGENT_ARGS="$(build_llm_args_for_model "$model")"
         USER_ARGS="$AGENT_ARGS"
 
         # 파일이 있으면 tau2가 resume 질문을 함 → 비대화형으로 자동 y 입력(2번 넣어서 2회 프롬프트까지 대비)
