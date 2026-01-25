@@ -12,6 +12,7 @@ from datetime import datetime
 import math
 import subprocess
 import platform
+from json import JSONDecodeError
 
 try:
     import pandas as pd
@@ -94,6 +95,80 @@ def setup_styles():
             'font': Font(size=9, name="Malgun Gothic", color="9C0006")
         }
     }
+
+def _extract_tool_args_json_errors(messages: list[dict]) -> tuple[int, str, str]:
+    """
+    messages[*].raw_data에 포함된 원본 tool_call.function.arguments 문자열을 기준으로
+    JSON 파싱 실패(빈 문자열/깨진 JSON)를 감지한다.
+
+    NOTE: 런타임에서는 llm_utils.py에서 크래시를 막기 위해 arguments를 빈 dict로 대체할 수 있으므로,
+    '파싱 실패 여부'는 여기에서 raw_data를 기준으로 판정해야 한다.
+    """
+    errs: list[dict] = []
+
+    for m in messages or []:
+        if (m.get("role") or "") != "assistant":
+            continue
+        raw = m.get("raw_data") or {}
+        # LiteLLM choice.to_dict() 형태: {"message": {...}, ...}
+        raw_msg = raw.get("message") if isinstance(raw, dict) else None
+        if not isinstance(raw_msg, dict):
+            continue
+        tool_calls = raw_msg.get("tool_calls") or []
+        if not isinstance(tool_calls, list):
+            continue
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            func = tc.get("function") or {}
+            if not isinstance(func, dict):
+                continue
+            name = func.get("name") or ""
+            args = func.get("arguments")
+            if args is None:
+                errs.append({"tool": name, "error": "arguments is None", "raw": None})
+                continue
+            if isinstance(args, dict):
+                # 이미 dict면 OK
+                continue
+            s = str(args).strip()
+            if s == "" or s.lower() in {"null", "none"}:
+                errs.append({"tool": name, "error": "arguments empty", "raw": s})
+                continue
+            try:
+                json.loads(s)
+            except JSONDecodeError as e:
+                errs.append(
+                    {
+                        "tool": name,
+                        "error": f"invalid JSON ({e.msg})",
+                        "raw": s[:500],
+                    }
+                )
+            except Exception as e:
+                errs.append(
+                    {
+                        "tool": name,
+                        "error": f"invalid JSON ({type(e).__name__})",
+                        "raw": s[:500],
+                    }
+                )
+
+    if not errs:
+        return 0, "", ""
+
+    # 사람용 요약
+    summary_parts = []
+    for e in errs[:6]:
+        t = e.get("tool") or "unknown_tool"
+        msg = e.get("error") or "error"
+        summary_parts.append(f"{t}: {msg}")
+    summary = "; ".join(summary_parts)
+    if len(errs) > 6:
+        summary += f" (+{len(errs)-6} more)"
+
+    return len(errs), summary, json.dumps(errs, ensure_ascii=False)
+
 
 def create_runs_raw_sheet(wb, runs, styles):
     """런 단위 원본 데이터(요청/GT/모델응답 포함). 모든 집계는 이 시트를 기반으로 파생."""
@@ -487,13 +562,13 @@ def create_runs_sheet(wb, runs, styles):
     """
     ws = wb.create_sheet("런", 1)
     ws.append(["Run 단위 케이스 (요청/GT/툴/응답/판정근거)"])
-    ws.merge_cells("A1:M1")
+    ws.merge_cells("A1:N1")
     ws["A1"].font = styles["title"]["font"]
     ws["A1"].alignment = styles["title"]["align"]
     ws.row_dimensions[1].height = 22
 
     ws.append(["필터로 PASS/FAIL, 모델, 도메인, TaskID를 좁혀서 보세요. 원본(JSON/툴응답)은 숨김 컬럼을 펼치면 확인 가능합니다."])
-    ws.merge_cells("A2:M2")
+    ws.merge_cells("A2:N2")
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 32
 
@@ -502,8 +577,19 @@ def create_runs_sheet(wb, runs, styles):
         "결과", "Reward", "툴호출수", "툴목록",
         "요청(원문)", "GT 요약", "모델 최종응답(원문)", "왜 맞/틀"
     ]
+    # taxonomy (최소 1컬럼만 노출)
+    headers.append("실패분류(L1/L2)")
     # 숨김(원본) 컬럼들(오른쪽)
-    hidden_headers = ["툴호출(JSON 원문)", "툴응답(원문)", "GT(원문 JSON)", "RewardBreakdown(JSON)", "ActionChecks(JSON)"]
+    hidden_headers = [
+        "툴호출(JSON 원문)",
+        "툴응답(원문)",
+        "GT(원문 JSON)",
+        "RewardBreakdown(JSON)",
+        "ActionChecks(JSON)",
+        "ToolArgsJSONErrorCount",
+        "ToolArgsJSONErrorSummary",
+        "ToolArgsJSONErrors(JSON)",
+    ]
     ws.append(headers + hidden_headers)
     hrow = ws.max_row
     for c in ws[hrow]:
@@ -514,9 +600,13 @@ def create_runs_sheet(wb, runs, styles):
 
     for run in runs:
         rb = run.get("RewardBreakdown") or {}
+        tool_args_err_cnt = int(run.get("ToolArgsJSONErrorCount") or 0)
+        tool_args_err_summary = run.get("ToolArgsJSONErrorSummary") or ""
+        fail_tag = "-"
         # 근거
         if run.get("Pass") == 1:
             why = "reward=1.0 (필수 액션/DB/커뮤니케이션 체크 통과)"
+            fail_tag = "-"
         else:
             parts = []
             term = str(run.get("Termination") or "")
@@ -526,9 +616,28 @@ def create_runs_sheet(wb, runs, styles):
                 parts.append(f"필수 액션 미충족: {run['MissingRequiredActions']}")
             if run.get("ActionMismatchCount") is not None and run.get("ActionMismatchCount") > 0:
                 parts.append(f"action_checks 불일치 {run['ActionMismatchCount']}건")
+            if tool_args_err_cnt > 0:
+                parts.append(f"tool args JSON 파싱 실패 {tool_args_err_cnt}건")
             if not parts:
                 parts.append(f"breakdown={rb}")
             why = " / ".join(parts)
+
+            # 실패분류(L1/L2): tool args JSON 깨짐은 schema mismatch로 우선 태깅
+            if tool_args_err_cnt > 0:
+                fail_tag = "Tool misuse / Schema mismatch"
+            elif "too_many_errors" in term:
+                fail_tag = "Infra/API / Too many errors"
+            elif "max_turns" in term:
+                fail_tag = "Loop/timeout / Max turns"
+            else:
+                if rb.get("ACTION") == 0.0:
+                    fail_tag = "Tool misuse / Missing required actions"
+                elif rb.get("DB") == 0.0:
+                    fail_tag = "Reasoning/Planning / DB mismatch"
+                elif rb.get("COMMUNICATE") == 0.0:
+                    fail_tag = "Missing info / Communication"
+                else:
+                    fail_tag = "Unknown"
 
         row = [
             run.get("RunID",""),
@@ -544,12 +653,16 @@ def create_runs_sheet(wb, runs, styles):
             run.get("GTSummary",""),
             run.get("AgentFinalRaw",""),
             why,
+            fail_tag,
             # hidden originals
             run.get("ToolCallsRaw",""),
             run.get("ToolResultsRaw",""),
             run.get("GTRaw",""),
             run.get("RewardBreakdownJSON",""),
             run.get("ActionChecksRaw",""),
+            run.get("ToolArgsJSONErrorCount", 0),
+            tool_args_err_summary,
+            run.get("ToolArgsJSONErrorsRaw", ""),
         ]
         ws.append(row)
         r = ws.max_row
@@ -577,12 +690,14 @@ def create_runs_sheet(wb, runs, styles):
         "A":34, "B":26, "C":10, "D":8, "E":6,
         "F":7, "G":8, "H":8, "I":20,
         "J":50, "K":22, "L":50, "M":34,
-        "N":44, "O":44, "P":44, "Q":26, "R":26
+        "N":26,
+        "O":44, "P":44, "Q":44, "R":26, "S":26,
+        "T":10, "U":34, "V":44
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
     # 숨김 컬럼
-    for col_letter in ["N","O","P","Q","R"]:
+    for col_letter in ["O","P","Q","R","S","T","U","V"]:
         ws.column_dimensions[col_letter].hidden = True
     return ws
 
@@ -1162,6 +1277,7 @@ def main():
             )
 
             messages = sim.get("messages", []) or []
+            tool_args_err_cnt, tool_args_err_summary, tool_args_errs_raw = _extract_tool_args_json_errors(messages)
             # run-level aggregation for tool count/names + raw request/gt/agent final
             tool_names: list[str] = []
             tool_count = 0
@@ -1269,6 +1385,9 @@ def main():
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,
                     "MissingRequiredActions": missing_actions_str,
+                    "ToolArgsJSONErrorCount": tool_args_err_cnt,
+                    "ToolArgsJSONErrorSummary": tool_args_err_summary,
+                    "ToolArgsJSONErrorsRaw": tool_args_errs_raw,
                 }
             )
 
