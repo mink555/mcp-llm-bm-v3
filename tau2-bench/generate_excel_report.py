@@ -621,13 +621,12 @@ def create_runs_sheet(wb, runs, styles):
     headers = [
         "RunID", "모델", "도메인", "TaskID", "Trial",
         "결과", "Reward", "툴호출수", "툴목록",
-        "요청(원문)", "GT 요약", "모델 최종응답(원문)", "왜 맞/틀"
+        "요청(원문)", "GT(원문 JSON)", "모델 최종응답(원문)", "모델 tool_calls(원문)", "왜 맞/틀"
     ]
     # taxonomy (최소 1컬럼만 노출)
     headers.append("실패분류(L1/L2)")
     # 숨김(원본) 컬럼들(오른쪽)
     hidden_headers = [
-        "툴호출(JSON 원문)",
         "툴응답(원문)",
         "GT(원문 JSON)",
         "RewardBreakdown(JSON)",
@@ -696,12 +695,12 @@ def create_runs_sheet(wb, runs, styles):
             run.get("ToolCallCount",0),
             run.get("ToolNames",""),
             run.get("UserRequestRaw",""),
-            run.get("GTSummary",""),
+            run.get("GTRaw",""),
             run.get("AgentFinalRaw",""),
+            run.get("ToolCallsRaw",""),
             why,
             fail_tag,
             # hidden originals
-            run.get("ToolCallsRaw",""),
             run.get("ToolResultsRaw",""),
             run.get("GTRaw",""),
             run.get("RewardBreakdownJSON",""),
@@ -735,8 +734,7 @@ def create_runs_sheet(wb, runs, styles):
     widths = {
         "A":34, "B":26, "C":10, "D":8, "E":6,
         "F":7, "G":8, "H":8, "I":20,
-        "J":50, "K":22, "L":50, "M":34,
-        "N":26,
+        "J":50, "K":40, "L":50, "M":38, "N":34,
         "O":44, "P":44, "Q":44, "R":26, "S":26,
         "T":10, "U":34, "V":44
     }
