@@ -561,14 +561,93 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.merge_cells('A3:O3')
     ws['A3'].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     ws.row_dimensions[3].height = 30
+
+    # ===== 실패사유/체크축 Glossary =====
+    ws.append([""])
+    ws.append(["실패사유(종료사유) / 평가체크(Reward 축) 빠른 해석 가이드"])
+    gloss_title_row = ws.max_row
+    ws.merge_cells(f"A{gloss_title_row}:O{gloss_title_row}")
+    ws.cell(row=gloss_title_row, column=1).font = styles["section"]["font"]
+    ws.row_dimensions[gloss_title_row].height = 20
+
+    ws.append(
+        [
+            "읽는 순서: (1) termination_reason(왜 멈췄나) → (2) reward_info(어떤 체크를 못 맞췄나). "
+            "AGENT_STOP/USER_STOP만 '정상 평가'로 들어가며, 그 외(MAX_STEPS/TOO_MANY_ERRORS/AGENT_ERROR/USER_ERROR)는 조기종료로 reward=0 처리됩니다."
+        ]
+    )
+    gloss_desc_row = ws.max_row
+    ws.merge_cells(f"A{gloss_desc_row}:O{gloss_desc_row}")
+    ws.cell(row=gloss_desc_row, column=1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[gloss_desc_row].height = 42
+
+    # termination_reason table
+    ws.append(["구분", "값(termination_reason)", "의미(직관)", "자주 보이는 실패 상황/해석"])
+    tr_h = ws.max_row
+    for c in range(1, 5):
+        cell = ws.cell(tr_h, c)
+        cell.font = styles["header"]["font"]
+        cell.fill = styles["header"]["fill"]
+        cell.alignment = styles["header"]["align"]
+        cell.border = styles["header"]["border"]
+
+    tr_rows = [
+        ["정상종료(가능)", "agent_stop", "에이전트가 종료 토큰으로 종료", "종료는 했어도 ACTION/ENV/DB 등을 못 맞추면 FAIL"],
+        ["정상종료(가능)", "user_stop", "유저가 STOP/TRANSFER/OUT-OF-SCOPE 등으로 종료", "유저가 포기/전환해도 user_stop로 종료 가능 → 결과는 reward로 판단"],
+        ["강제종료", "max_steps", "최대 스텝 초과", "루프/진전 없음 → 조기종료로 reward=0"],
+        ["강제종료", "too_many_errors", "오류 누적(툴/프로토콜/예외)", "툴 호출 실패/예외 누적 → 조기종료로 reward=0"],
+        ["오류종료", "agent_error", "에이전트 프로토콜 위반/예외", "빈 메시지, 텍스트+툴콜 혼합 등 → 조기종료로 reward=0"],
+        ["오류종료", "user_error", "유저 프로토콜 위반/예외", "유저 시뮬레이터 규칙 위반 → 조기종료로 reward=0"],
+    ]
+    for rr in tr_rows:
+        ws.append(rr)
+        r = ws.max_row
+        for c in range(1, 5):
+            cell = ws.cell(r, c)
+            cell.border = styles["data"]["border"]
+            cell.alignment = styles["data"]["align"] if c != 2 else styles["data_center"]["align"]
+
+    ws.append([""])
+
+    # reward axis table
+    ws.append(["축", "데이터(리포트에서 보는 곳)", "의미(직관)", "FAIL이면 바로 보는 포인트"])
+    ax_h = ws.max_row
+    for c in range(1, 5):
+        cell = ws.cell(ax_h, c)
+        cell.font = styles["header"]["font"]
+        cell.fill = styles["header"]["fill"]
+        cell.alignment = styles["header"]["align"]
+        cell.border = styles["header"]["border"]
+
+    ax_rows = [
+        ["ACTION", "런: 필수툴/호출툴/누락툴 + action_checks 불일치", "필수 툴/행동(절차) 수행 여부", "누락툴이 있는지, action_match=false 항목"],
+        ["ENV_ASSERTION", "런: 깨진 env_assertions", "최종 환경 조건(assertion) 만족 여부", "met=false인 assertion 목록(예: speed=excellent)"],
+        ["DB", "RewardBreakdown/db_check(숨김 컬럼)", "골드 vs 예측 DB 상태 일치 여부", "db_match=false (도메인에 따라)"],
+        ["COMMUNICATE", "RewardBreakdown/communicate_checks(도메인에 따라)", "사용자 커뮤니케이션 요구사항 충족", "communicate가 0 또는 note 확인"],
+        ["NL_ASSERTION", "RewardBreakdown/nl_assertions(있는 경우)", "자연어 assertion 충족(WIP 포함)", "실패한 assertion 항목"],
+    ]
+    for rr in ax_rows:
+        ws.append(rr)
+        r = ws.max_row
+        for c in range(1, 5):
+            cell = ws.cell(r, c)
+            cell.border = styles["data"]["border"]
+            cell.alignment = styles["data"]["align"]
+
+    # 폭 조정(Glossary 영역)
+    ws.column_dimensions["A"].width = max(ws.column_dimensions["A"].width or 8, 12)
+    ws.column_dimensions["B"].width = max(ws.column_dimensions["B"].width or 40, 26)
+    ws.column_dimensions["C"].width = max(ws.column_dimensions["C"].width or 14, 26)
+    ws.column_dimensions["D"].width = max(ws.column_dimensions["D"].width or 14, 54)
     
     ws.append([""])
     
-    # Section title
+    # Section title (glossary가 추가되었으므로 위치가 유동적)
     ws.append(["Overall Pass^k 랭킹 (전 도메인 평균)"])
-    ws.merge_cells('A5:F5')
-    ws['A5'].font = styles['section']['font']
-    ws.row_dimensions[5].height = 20
+    rank_title_row = ws.max_row
+    ws.merge_cells(f"A{rank_title_row}:F{rank_title_row}")
+    ws.cell(row=rank_title_row, column=1).font = styles['section']['font']
+    ws.row_dimensions[rank_title_row].height = 20
     
     # Headers
     headers = ["순위", "모델", "Pass@1", "Pass@2", "Pass@4", "RankKey(hidden)"]
@@ -909,38 +988,81 @@ def create_runs_sheet(wb, runs, styles):
 
 
 def create_turns_sheet(wb, turns_rows, styles):
-    """턴 단위 원본(필요 시만 보는 디버깅 시트)."""
-    ws = wb.create_sheet("턴", 2)
-    headers = ["RunID", "모델", "도메인", "TaskID", "Trial", "TurnIdx", "Role", "Content(원문)", "ToolCalls(JSON)", "ToolResult(원문)"]
+    """턴 단위(대화 흐름을 직관적으로 보는 시트)."""
+    ws = wb.create_sheet("대화", 2)
+    ws.append(["대화 흐름(원문) + 툴콜/툴결과를 한눈에"])
+    ws.merge_cells("A1:M1")
+    ws["A1"].font = styles["title"]["font"]
+    ws["A1"].alignment = styles["title"]["align"]
+    ws.row_dimensions[1].height = 22
+
+    ws.append(["팁: RunID로 필터한 뒤 TurnIdx 오름차순으로 보면 한 케이스의 대화가 순서대로 보입니다. TOOL_CALL/TOOL_RESULT 행이 핵심입니다."])
+    ws.merge_cells("A2:M2")
+    ws["A2"].alignment = styles["data"]["align"]
+    ws.row_dimensions[2].height = 28
+
+    headers = [
+        "RunID",
+        "모델",
+        "도메인",
+        "TaskID",
+        "Trial",
+        "TurnIdx",
+        "Role",
+        "Kind",
+        "ToolName(요약)",
+        "ToolArgs(원문)",
+        "Text(원문)",
+        "ToolResult(원문)",
+        "ToolCalls(JSON 원문)",
+    ]
     ws.append(headers)
-    for c in ws[1]:
+    header_row = ws.max_row
+    for c in ws[header_row]:
         c.font = styles["header"]["font"]
         c.fill = styles["header"]["fill"]
         c.alignment = styles["header"]["align"]
         c.border = styles["header"]["border"]
     for row in turns_rows:
         ws.append(row)
-    for r in range(2, ws.max_row + 1):
-        for c in range(1, len(headers)+1):
+    for r in range(header_row + 1, ws.max_row + 1):
+        for c in range(1, len(headers) + 1):
             cell = ws.cell(r,c)
             cell.border = styles["data"]["border"]
-            cell.alignment = styles["data_center"]["align"] if c in [5,6] else styles["data"]["align"]
-        ws.row_dimensions[r].height = 44
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
+            if c in [5, 6]:
+                cell.alignment = styles["data_center"]["align"]
+            elif c in [7, 8]:
+                cell.alignment = styles["data_center"]["align"]
+            else:
+                cell.alignment = styles["data"]["align"]
+        ws.row_dimensions[r].height = 60
+        # kind별로 아주 옅게 배경(가독성)
+        kind = (ws.cell(r, 8).value or "")
+        if kind == "TOOL_CALL":
+            for cc in range(1, len(headers) + 1):
+                ws.cell(r, cc).fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # 연노랑
+        elif kind == "TOOL_RESULT":
+            for cc in range(1, len(headers) + 1):
+                ws.cell(r, cc).fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")  # 연회색
+
+    ws.freeze_panes = f"A{header_row+1}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{ws.max_row}"
+
     ws.column_dimensions["A"].width = 34
-    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["B"].width = 24
     ws.column_dimensions["C"].width = 10
-    ws.column_dimensions["D"].width = 8
+    ws.column_dimensions["D"].width = 10
     ws.column_dimensions["E"].width = 6
     ws.column_dimensions["F"].width = 7
-    ws.column_dimensions["G"].width = 8
-    ws.column_dimensions["H"].width = 70
-    ws.column_dimensions["I"].width = 50
-    ws.column_dimensions["J"].width = 50
-    # JSON/툴결과는 기본 숨김(필요할 때만 펼치기)
-    ws.column_dimensions["I"].hidden = True
-    ws.column_dimensions["J"].hidden = True
+    ws.column_dimensions["G"].width = 10
+    ws.column_dimensions["H"].width = 12
+    ws.column_dimensions["I"].width = 24
+    ws.column_dimensions["J"].width = 44
+    ws.column_dimensions["K"].width = 54
+    ws.column_dimensions["L"].width = 54
+    ws.column_dimensions["M"].width = 50
+    # ToolCalls(JSON)은 필요할 때만 펼치기
+    ws.column_dimensions["M"].hidden = True
     return ws
     
     # Title
@@ -1559,6 +1681,24 @@ def generate_report(
                 )
 
                 # 턴 원본 시트 row
+                # 직관형 턴 시트용: kind/tool_name/tool_args/text/tool_result로 분리
+                kind = "TEXT"
+                tool_names_join = ""
+                tool_args_join = ""
+                tool_calls_json = json.dumps(tool_calls, ensure_ascii=False) if tool_calls else ""
+                if role == "tool":
+                    kind = "TOOL_RESULT"
+                elif role == "assistant" and tool_calls:
+                    kind = "TOOL_CALL"
+                    names = []
+                    args = []
+                    for tc in tool_calls:
+                        n = tc.get("name")
+                        if n:
+                            names.append(n)
+                        args.append(json.dumps(tc.get("arguments", {}), ensure_ascii=False))
+                    tool_names_join = "; ".join(names)
+                    tool_args_join = "\n".join(args)
                 turns_rows.append(
                     [
                         run_id,
@@ -1568,9 +1708,12 @@ def generate_report(
                         int(trial),
                         idx,
                         role,
-                        content,
-                        json.dumps(tool_calls, ensure_ascii=False) if tool_calls else "",
+                        kind,
+                        tool_names_join,
+                        tool_args_join,
+                        content if role != "tool" else "",
                         content if role == "tool" else "",
+                        tool_calls_json,
                     ]
                 )
 
@@ -1671,9 +1814,9 @@ def generate_report(
     ws_dom.column_dimensions["C"].width = 60
 
     # ===== 3-sheet layout (visible) =====
-    create_summary_sheet(wb, models_mapping, domains, styles)     # 요약(랭킹+매트릭스)
-    create_runs_sheet(wb, runs, styles)                           # 런(케이스 단위)
-    create_turns_sheet(wb, turns_rows, styles)                    # 턴(디버깅)
+    create_summary_sheet(wb, models_mapping, domains, styles)     # 요약(랭킹+매트릭스+Glossary)
+    create_runs_sheet(wb, runs, styles)                           # 런(케이스 단위, 원본 + 실패사유)
+    create_turns_sheet(wb, turns_rows, styles)                    # 대화(원문 + TOOL_CALL/RESULT)
 
     # ===== helper sheets (hidden) =====
     create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles)  # Pass^k 계산용
