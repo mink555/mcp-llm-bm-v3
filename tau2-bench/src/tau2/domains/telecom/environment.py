@@ -185,11 +185,11 @@ def get_tasks_split() -> dict[str, list[str]]:
 
 
 # Legacy functions for backward compatibility
-def get_tasks_full() -> list[Task]:
+def get_tasks_full(task_split_name: Optional[str] = None) -> list[Task]:
     return get_tasks("full")
 
 
-def get_tasks_small() -> list[Task]:
+def get_tasks_small(task_split_name: Optional[str] = None) -> list[Task]:
     return get_tasks("small")
 
 
