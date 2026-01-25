@@ -130,6 +130,28 @@ def _extract_action_mismatches(reward_info: dict) -> list[str]:
     return out
 
 
+def _normalize_reward_key(k: object) -> str:
+    s = str(k)
+    # RewardType.ENV_ASSERTION 같은 형태 정리
+    if "." in s:
+        s = s.split(".")[-1]
+    return s.strip()
+
+
+def _get_rb_value(reward_breakdown: dict, key: str) -> float | None:
+    if not isinstance(reward_breakdown, dict):
+        return None
+    want = key.upper()
+    for k, v in reward_breakdown.items():
+        kk = _normalize_reward_key(k).upper()
+        if kk == want:
+            try:
+                return float(v)
+            except Exception:
+                return None
+    return None
+
+
 def _make_fail_reason(
     *,
     pass_flag: int,
@@ -659,6 +681,47 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.merge_cells(f"A{flow_desc_row}:O{flow_desc_row}")
     ws.cell(row=flow_desc_row, column=1).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
     ws.row_dimensions[flow_desc_row].height = 84
+
+    # ===== 케이스 1개로 보는 스코어가 찍히는 방식(직관) =====
+    ws.append([""])
+    ws.append(["케이스 예시(런 시트 첫 행 기준) — 멀티턴 왕복 → 체크 → Reward/PASS"])
+    ex_title_row = ws.max_row
+    ws.merge_cells(f"A{ex_title_row}:O{ex_title_row}")
+    ws.cell(row=ex_title_row, column=1).font = styles["section"]["font"]
+
+    ws.append(["항목", "값(런! 첫 케이스에서 자동 참조)", "해석"])
+    ex_h = ws.max_row
+    for c in range(1, 4):
+        cell = ws.cell(ex_h, c)
+        cell.font = styles["header"]["font"]
+        cell.fill = styles["header"]["fill"]
+        cell.alignment = styles["header"]["align"]
+        cell.border = styles["header"]["border"]
+
+    # 런 시트: 헤더가 3행, 첫 데이터는 4행으로 가정
+    r = ws.max_row
+    rows = [
+        ("종료사유", "=런!F4", "agent_stop/user_stop이면 정상 평가, 그 외는 조기종료로 reward=0"),
+        ("조기종료?", "=런!G4", "Y면 조기종료(대개 max_steps/too_many_errors/agent_error/user_error)"),
+        ("RewardBasis", "=런!J4", "어떤 축이 점수에 포함됐는지(AND처럼 곱해짐)"),
+        ("RB_ENV_ASSERTION", "=런!K4", "환경 assertion(예: speed=excellent)이 0이면 실패"),
+        ("RB_ACTION", "=런!L4", "필수툴/행동이 0이면 실패"),
+        ("누락툴", "=런!R4", "필수툴(GT) 중 실제 호출툴에 없는 것"),
+        ("깨진 env_assertions", "=런!S4", "met=false인 assertion 목록(왜 안 됐는지)"),
+        ("PASS?", "=런!I4", "reward==1.0이고 조기종료가 아니면 PASS"),
+    ]
+    for label, formula, explain in rows:
+        ws.append([label, formula, explain])
+        rr = ws.max_row
+        ws.cell(rr, 2).value = formula
+        for c in range(1, 4):
+            cell = ws.cell(rr, c)
+            cell.border = styles["data"]["border"]
+            cell.alignment = styles["data"]["align"] if c != 2 else styles["data"]["align"]
+
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 54
+    ws.column_dimensions["C"].width = 54
     
     ws.append([""])
     
@@ -872,30 +935,37 @@ def create_runs_sheet(wb, runs, styles):
     - 원본/JSON/툴응답은 숨김 컬럼으로 유지(사용자가 필요시 펼치기)
     """
     ws = wb.create_sheet("런", 1)
-    ws.append(["Run 단위 케이스 (요청/GT/툴/응답/판정근거)"])
-    ws.merge_cells("A1:N1")
+    ws.append(["Run 단위 케이스 (스코어/실패원인 먼저 → 필요 시 원문 펼치기)"])
+    ws.merge_cells("A1:U1")
     ws["A1"].font = styles["title"]["font"]
     ws["A1"].alignment = styles["title"]["align"]
     ws.row_dimensions[1].height = 22
 
-    ws.append(["필터로 PASS/FAIL, 모델, 도메인, TaskID를 좁혀서 보세요. 원본(JSON/툴응답)은 숨김 컬럼을 펼치면 확인 가능합니다."])
-    ws.merge_cells("A2:N2")
+    ws.append(["읽는 법: (1) 종료사유/조기종료? (2) RewardBasis/RB_* 중 0인 축 (3) 누락툴/깨진 assertion 확인. 원문(JSON/툴로그)은 숨김 컬럼을 펼치면 됩니다."])
+    ws.merge_cells("A2:U2")
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 32
 
-    # "원본 중심" + 실패 사유를 바로 읽히게
+    # 정보 과다 방지: '스코어/실패원인'을 앞에 배치하고, 원문은 숨김 컬럼으로 이동
     headers = [
         "RunID", "모델", "도메인", "TaskID", "Trial",
-        "결과", "Reward", "종료사유",
-        "요청(원문: 시나리오 JSON)", "GT(원문 JSON)", "모델 tool_calls(원문)",
-        "툴결과(원문)", "모델 최종응답(원문)",
-        "왜 맞/틀(한줄)", "왜 맞/틀(상세)",
+        "종료사유", "조기종료?", "Reward", "PASS?",
+        "RewardBasis",
+        "RB_ENV_ASSERTION", "RB_ACTION", "RB_DB", "RB_COMMUNICATE", "RB_NL_ASSERTION",
         "필수툴(GT)", "호출툴(모델)", "누락툴",
         "깨진 env_assertions", "action_checks 불일치",
-        "실패분류(L1/L2)"
+        "실패분류(L1/L2)",
     ]
     hidden_headers = [
+        "결과(PASS/FAIL)",
         "사용자 첫 발화(원문)",
+        "요청(원문: 시나리오 JSON)",
+        "GT(원문 JSON)",
+        "모델 tool_calls(원문)",
+        "툴결과(원문)",
+        "모델 최종응답(원문)",
+        "왜 맞/틀(한줄)",
+        "왜 맞/틀(상세)",
         "RewardBreakdown(JSON)",
         "ToolArgsJSONErrorCount",
         "ToolArgsJSONErrorSummary",
@@ -944,16 +1014,16 @@ def create_runs_sheet(wb, runs, styles):
             run.get("Domain",""),
             run.get("TaskID",""),
             run.get("Trial",0),
-            "PASS" if run.get("Pass")==1 else "FAIL",
-            run.get("Reward",0.0),
             term,
-            req_raw,
-            gt_raw,
-            tool_calls_raw,
-            tool_results_raw,
-            agent_final_raw,
-            why_one,
-            why_detail,
+            "Y" if term not in {"agent_stop", "user_stop"} else "N",
+            run.get("Reward",0.0),
+            "PASS" if run.get("Pass")==1 else "FAIL",
+            run.get("RewardBasisRaw",""),
+            run.get("RB_ENV_ASSERTION"),
+            run.get("RB_ACTION"),
+            run.get("RB_DB"),
+            run.get("RB_COMMUNICATE"),
+            run.get("RB_NL_ASSERTION"),
             ", ".join(required_tools) if required_tools else "",
             ", ".join(called_tools) if called_tools else "",
             ", ".join(missing_tools) if missing_tools else "",
@@ -961,7 +1031,15 @@ def create_runs_sheet(wb, runs, styles):
             "\n".join(action_mismatches) if action_mismatches else "",
             fail_tag,
             # hidden
+            "PASS" if run.get("Pass")==1 else "FAIL",
             first_user_raw,
+            req_raw,
+            gt_raw,
+            tool_calls_raw,
+            tool_results_raw,
+            agent_final_raw,
+            why_one,
+            why_detail,
             run.get("RewardBreakdownJSON",""),
             run.get("ToolArgsJSONErrorCount", 0),
             tool_args_err_summary,
@@ -973,37 +1051,40 @@ def create_runs_sheet(wb, runs, styles):
         for col_idx in range(1, len(headers) + len(hidden_headers) + 1):
             cell = ws.cell(r, col_idx)
             cell.border = styles["data"]["border"]
-            if col_idx in [5,6,7,8]:
+            if col_idx in [5,6,7,8,9]:
+                cell.alignment = styles["data_center"]["align"]
+            elif col_idx in [11,12,13,14,15]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
         # 결과 색
-        rc = ws.cell(r, 6)
+        rc = ws.cell(r, 9)  # PASS?
         if run.get("Pass")==1:
             rc.fill = styles["pass"]["fill"]; rc.font = styles["pass"]["font"]
         else:
             rc.fill = styles["fail"]["fill"]; rc.font = styles["fail"]["font"]
-        ws.row_dimensions[r].height = 110
+        ws.row_dimensions[r].height = 84
 
     ws.freeze_panes = f"A{hrow+1}"
     ws.auto_filter.ref = f"A{hrow}:{get_column_letter(len(headers)+len(hidden_headers))}{ws.max_row}"
 
-    # Column widths (간결)
+    # Column widths (핵심만 보이게)
     widths = {
-        "A":34, "B":24, "C":10, "D":10, "E":6,
-        "F":7, "G":8, "H":12,
-        "I":56, "J":54, "K":54,
-        "L":54, "M":54, "N":54,
-        "O":34, "P":28, "Q":28,
-        "R":34, "S":34, "T":26,
-        # hidden
-        "U":44, "V":28, "W":10, "X":34, "Y":44
+        "A":34, "B":22, "C":10, "D":10, "E":6,
+        "F":12, "G":10, "H":8, "I":8,
+        "J":26,
+        "K":14, "L":10, "M":10, "N":14, "O":14,
+        "P":22, "Q":22, "R":22,
+        "S":36, "T":36,
+        "U":26,
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
-    # 숨김 컬럼
-    for col_letter in ["U","V","W","X","Y"]:
-        ws.column_dimensions[col_letter].hidden = True
+    # 숨김 컬럼(원문/디버깅): headers 다음부터 전부 숨김
+    start_hidden = len(headers) + 1
+    end_hidden = len(headers) + len(hidden_headers)
+    for idx in range(start_hidden, end_hidden + 1):
+        ws.column_dimensions[get_column_letter(idx)].hidden = True
     return ws
 
 
@@ -1628,6 +1709,17 @@ def generate_report(
             # 실패 원인(원문 기반)
             failed_env_assertions = _extract_failed_env_assertions(reward_info)
             action_mismatches = _extract_action_mismatches(reward_info)
+            reward_basis = reward_info.get("reward_basis") or []
+            if isinstance(reward_basis, list):
+                reward_basis_norm = [ _normalize_reward_key(x) for x in reward_basis ]
+            else:
+                reward_basis_norm = []
+
+            rb_env = _get_rb_value(reward_breakdown, "ENV_ASSERTION")
+            rb_action = _get_rb_value(reward_breakdown, "ACTION")
+            rb_db = _get_rb_value(reward_breakdown, "DB")
+            rb_comm = _get_rb_value(reward_breakdown, "COMMUNICATE")
+            rb_nl = _get_rb_value(reward_breakdown, "NL_ASSERTION")
 
             # TAU2 success 기준: reward가 1.0(±1e-6)
             is_pass = 1 if abs(float(reward) - 1.0) <= 1e-6 else 0
@@ -1779,6 +1871,12 @@ def generate_report(
                     "Reward": float(reward),
                     "RewardBreakdownJSON": json.dumps(reward_breakdown, ensure_ascii=False),
                     "RewardBreakdown": reward_breakdown,
+                    "RewardBasisRaw": json.dumps(reward_basis_norm, ensure_ascii=False),
+                    "RB_ENV_ASSERTION": rb_env,
+                    "RB_ACTION": rb_action,
+                    "RB_DB": rb_db,
+                    "RB_COMMUNICATE": rb_comm,
+                    "RB_NL_ASSERTION": rb_nl,
                     "Termination": sim.get("termination_reason", "N/A"),
                     "ToolCallCount": tool_count,
                     "ToolNames": ", ".join(tool_names),
@@ -1797,6 +1895,7 @@ def generate_report(
                     "CalledTools": called_tools,
                     "MissingTools": missing_tools,
                     "FailedEnvAssertions": failed_env_assertions,
+                    "FailedEnvAssertionCount": len(failed_env_assertions),
                     "ActionMismatches": action_mismatches,
                     "ToolArgsJSONErrorCount": tool_args_err_cnt,
                     "ToolArgsJSONErrorSummary": tool_args_err_summary,
