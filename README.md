@@ -111,6 +111,23 @@ export OPENROUTER_API_KEY="YOUR_KEY"
 
 키는 절대 커밋하지 마세요. (`.gitignore`에 `.env`가 포함되어 있습니다.)
 
+## OpenRouter로 모델 실력 검증: 빠른 사용법(테이블)
+
+아래 표는 “어떻게 실행하면 무엇을 확인할 수 있는지”를 한눈에 정리한 것입니다.
+
+| 목적 | 실행 명령 | 무엇을 확인하나 |
+|---|---|---|
+| **연결/키 확인** | `cd tau2-bench`<br>`tau2 check-data` | 데이터 경로/환경 설정이 정상인지 |
+| **초고속 1개 테스트(telecom)** | `cd tau2-bench`<br>`export OPENROUTER_API_KEY="YOUR_KEY"`<br>`tau2 run --domain telecom --agent-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --user-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --num-trials 1 --num-tasks 1 --max-concurrency 1 --log-level ERROR` | 1개 태스크에서 **툴 호출이 실제로 나오는지**, 통신이 되는지 |
+| **엑셀 리포트 생성** | `cd tau2-bench`<br>`python3 generate_excel_report.py` | 요청/GT/모델 응답/FAIL 원인을 리포트로 확인 |
+| **5개 모델 × 3도메인 전체 평가** | `cd tau2-bench`<br>`./run_evaluation.sh` | 전체 Pass^k/도메인 성능 비교 |
+| **OpenRouter provider 고정(툴콜 정상화)** | `cd tau2-bench`<br>`OPENROUTER_PROVIDER_ORDER="Mistral" OPENROUTER_ALLOW_FALLBACKS=0 ./run_evaluation.sh` | provider 라우팅을 고정해 **tool_calls 구조화가 깨지는 문제** 회피 |
+
+### 짧은 해석 포인트
+- **툴콜이 실제로 들어오면** `Action Checks`가 ✅로 올라가기 시작합니다.  
+- **툴콜이 text로만 나오면** `tool_calls`가 비어 있어 **FAIL**로 찍히는 게 정상입니다.  
+- 따라서 **OpenRouter provider 라우팅이 툴콜 품질에 큰 영향**을 줍니다.
+
 ## 평가 대상 모델(요청하신 5개)
 
 - `openrouter/meta-llama/llama-3.3-70b-instruct`
