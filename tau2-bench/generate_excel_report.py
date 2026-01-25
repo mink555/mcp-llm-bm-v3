@@ -523,9 +523,9 @@ def create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles):
         ws.cell(row=row_num, column=3).value = f'=IFERROR(VLOOKUP(B{row_num},도메인_설명!$A:$C,3,FALSE),"")'
 
         # 총시행/성공횟수: 런 시트 기반 (외부/연결 오탐 방지)
-        # 런: B 모델, C 도메인, D TaskID, F 결과(PASS/FAIL)
+        # 런: B 모델, C 도메인, D TaskID, I PASS?
         ws.cell(row=row_num, column=5).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num})'
-        ws.cell(row=row_num, column=6).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num},런!$F:$F,\"PASS\")'
+        ws.cell(row=row_num, column=6).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num},런!$I:$I,\"PASS\")'
         
         # Pass@1 formula: COMBIN(E, 1) / COMBIN(D, 1) = E / D
         ws.cell(row=row_num, column=7).value = f"=IFERROR(F{row_num}/E{row_num}, 0)"
@@ -945,6 +945,12 @@ def create_runs_sheet(wb, runs, styles):
     ws.merge_cells("A2:U2")
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 32
+
+    # Pass@k 관련 주의(표본 부족이면 0으로 보일 수 있음)
+    ws.append(["주의: Pass@2/Pass@4는 해당 Task의 총시행(n)이 각각 2/4 미만이면 '계산 불가'라서 0으로 표시될 수 있습니다(FAIL 반영이 안 된 게 아니라 표본 부족)."])
+    ws.merge_cells("A3:U3")
+    ws["A3"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[3].height = 28
 
     # 정보 과다 방지: '스코어/실패원인'을 앞에 배치하고, 원문은 숨김 컬럼으로 이동
     headers = [
