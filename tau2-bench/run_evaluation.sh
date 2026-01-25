@@ -91,6 +91,8 @@ PY
 echo "Starting TAU2-Bench Evaluation..."
 echo "Trials: $NUM_TRIALS | Temp: $TEMP | MaxTokens: $MAX_TOKENS | Resume: $RESUME | Force: $FORCE"
 
+mkdir -p results
+
 for model in "${MODELS[@]}"; do
     sanitized=$(sanitize_model_name "$model")
     echo "------------------------------------------"
@@ -158,13 +160,16 @@ for model in "${MODELS[@]}"; do
         fi
     done
     
-    # Generate intermediate report
-    if ! python3 generate_excel_report.py; then
-        echo "  [WARN] generate_excel_report.py failed. Continuing."
+    # 전체/모델별 리포트(폴더 구조 통일: results/전체_요약 + results/모델별/<라벨>)
+    if ! python3 generate_reports.py --results-root results; then
+        echo "  [WARN] generate_reports.py failed. Continuing."
+    else
+        echo "  Reports updated under: results/"
     fi
-    echo "  Intermediate report updated."
 done
 
 echo "------------------------------------------"
 echo "Evaluation Complete."
-echo "Final Report: tau2_evaluation_report.xlsx"
+echo "Final Reports:"
+echo "  - results/전체_요약/TAU2_전체요약_latest.xlsx"
+echo "  - results/모델별/<모델라벨>/TAU2_<모델라벨>_latest.xlsx"

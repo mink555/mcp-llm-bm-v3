@@ -1214,30 +1214,37 @@ def create_case_summary_sheet(wb, runs, styles):
     ws.column_dimensions["M"].width = 44
     ws.column_dimensions["N"].width = 26
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model-filter', type=str, default=None)
-    args = parser.parse_args()
-    
-    base_dirs = [Path("data/simulations"), Path("data/tau2/simulations")]
-    base_dir = next((d for d in base_dirs if d.exists()), None)
-    
-    if not base_dir:
-        print("Error: Results directory not found.")
-        return
 
-    # 평가 대상 모델(표 표시 순서 고정)
-    llm_to_label = {
-        "openrouter/meta-llama/llama-3.3-70b-instruct": "llama-3.3-70b-instruct-FC",
-        "openrouter/mistralai/mistral-small-3.2-24b-instruct": "mistral-small-3.2-24b-instruct-FC",
-        "openrouter/qwen/qwen3-32b": "qwen3-32b-FC",
-        "openrouter/qwen/qwen3-14b": "qwen3-14b-FC",
-        "openrouter/qwen/qwen3-next-80b-a3b-instruct": "qwen3-next-80b-a3b-instruct-FC",
-    }
+# 평가 대상 모델(표 표시 순서 고정)
+# - 다른 스크립트(generate_reports.py)에서도 동일한 순서를 재사용하기 위해 상수로 분리
+LLM_TO_LABEL: dict[str, str] = {
+    "openrouter/meta-llama/llama-3.3-70b-instruct": "llama-3.3-70b-instruct-FC",
+    "openrouter/mistralai/mistral-small-3.2-24b-instruct": "mistral-small-3.2-24b-instruct-FC",
+    "openrouter/qwen/qwen3-32b": "qwen3-32b-FC",
+    "openrouter/qwen/qwen3-14b": "qwen3-14b-FC",
+    "openrouter/qwen/qwen3-next-80b-a3b-instruct": "qwen3-next-80b-a3b-instruct-FC",
+}
+
+def _find_default_base_dir() -> Path | None:
+    base_dirs = [Path("data/simulations"), Path("data/tau2/simulations")]
+    return next((d for d in base_dirs if d.exists()), None)
+
+
+def generate_report(*, output_path: Path, model_filter: str | None = None, base_dir: Path | None = None) -> None:
+    """
+    리포트 생성 엔트리포인트(재사용 가능).
+    - output_path: 저장할 xlsx 경로
+    - model_filter: 특정 LLM 문자열(예: openrouter/... )만 포함하고 싶을 때
+    - base_dir: 결과 json 폴더(기본: data/simulations 또는 data/tau2/simulations 자동 탐색)
+    """
+    base_dir = base_dir or _find_default_base_dir()
+    if not base_dir:
+        raise RuntimeError("Results directory not found. (expected data/simulations or data/tau2/simulations)")
+
     # 모델 매핑은 {llm_string: label} 형태로 유지
-    models_mapping = dict(llm_to_label)
-    if args.model_filter:
-        models_mapping = {k: v for k, v in models_mapping.items() if k == args.model_filter}
+    models_mapping = dict(LLM_TO_LABEL)
+    if model_filter:
+        models_mapping = {k: v for k, v in models_mapping.items() if k == model_filter}
 
     domains = ["retail", "airline", "telecom"]
     all_logs = []
@@ -1477,7 +1484,7 @@ def main():
         if name in wb.sheetnames:
             wb[name].sheet_state = "hidden"
     
-    output_path = Path("tau2_evaluation_report.xlsx")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
     # macOS Excel 경고(외부 데이터 연결/신뢰) 오탐을 줄이기 위해 xattr 제거
     # - 실제로 외부 연결은 포함되어 있지 않음(패키지 검사 기준).
@@ -1487,14 +1494,23 @@ def main():
             subprocess.run(["xattr", "-c", str(output_path)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
-    print(f"\nReport generated: {output_path}")
-    print(f"  - Sheet 1: 전체 모델 평가 요약 (Overall ranking)")
-    print(f"  - Sheet 2: 모델 × 도메인 Pass^k 매트릭스")
-    print(f"  - Sheet 3: 상세 런 로그 (PASS/FAIL 모두 포함)")
-    print(f"  - Sheet 4: 원본 데이터 (Raw trial data)")
-    print(f"  - Sheet 5: Task별 집계 (Task-level Pass^k calculations)")
-    print(f"  - Data: {len(all_logs)} runs")
-    print(f"  - All metrics calculated using Excel formulas (COMBIN, AVERAGEIF, etc.)\n")
+    # 로그 출력은 사용자가 CLI에서 쓸 때만 의미가 있으므로, 호출자가 선택적으로 처리
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-filter", type=str, default=None, help="LLM 문자열(예: openrouter/...)로 단일 모델만 리포트 생성")
+    parser.add_argument("--output", type=str, default="tau2_evaluation_report.xlsx", help="출력 xlsx 경로(기본: tau2_evaluation_report.xlsx)")
+    parser.add_argument("--input-dir", type=str, default=None, help="시뮬레이션 json 폴더(기본: data/simulations 자동 탐색)")
+    args = parser.parse_args()
+
+    base_dir = Path(args.input_dir) if args.input_dir else None
+    out = Path(args.output)
+    generate_report(output_path=out, model_filter=args.model_filter, base_dir=base_dir)
+
+    print(f"\nReport generated: {out}")
+    print(f"  - Visible sheets: 요약, 런, 턴 (helper는 숨김)")
+    print(f"  - Data source: {str(base_dir or _find_default_base_dir())}")
 
 if __name__ == "__main__":
     main()

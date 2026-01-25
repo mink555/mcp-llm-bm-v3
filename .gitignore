@@ -6,3 +6,7 @@
 .env
 .env.local
 .env.*.local
+
+# TAU2 결과 산출물(리포트/중간 결과)
+tau2-bench/results/
+tau2-bench/*.xlsx
