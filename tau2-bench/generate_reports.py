@@ -10,6 +10,8 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+import json
+
 from generate_excel_report import generate_report, LLM_TO_LABEL
 
 
@@ -23,11 +25,30 @@ def sanitize_folder_name(s: str) -> str:
     )
 
 
+def detect_llms_in_input_dir(input_dir: Path) -> set[str]:
+    llms: set[str] = set()
+    for fp in sorted(input_dir.glob("*.json")):
+        try:
+            data = json.loads(fp.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        info = data.get("info") or {}
+        agent_llm = (((info.get("agent_info") or {}).get("llm")) or "").strip()
+        if agent_llm:
+            llms.add(agent_llm)
+    return llms
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--results-root", type=str, default="results", help="결과 폴더 루트(기본: results)")
     ap.add_argument("--input-dir", type=str, default=None, help="시뮬레이션 json 폴더(기본: data/simulations 자동 탐색)")
     ap.add_argument("--timestamp", action="store_true", help="파일명에 타임스탬프를 붙임")
+    ap.add_argument(
+        "--all-models",
+        action="store_true",
+        help="입력에 없는 모델도 포함해(빈 리포트라도) 5개 모델 전부 생성",
+    )
     args = ap.parse_args()
 
     results_root = Path(args.results_root)
@@ -35,20 +56,40 @@ def main() -> None:
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S") if args.timestamp else "latest"
 
+    # 기본: 입력 폴더에 실제로 존재하는 모델만 리포트 생성(불필요한 빈 파일 생성 방지)
+    models_mapping = dict(LLM_TO_LABEL)
+    if base_dir and base_dir.exists() and not args.all_models:
+        present = detect_llms_in_input_dir(base_dir)
+        models_mapping = {k: v for k, v in models_mapping.items() if k in present}
+
     # 1) 전체 요약
     overall_dir = results_root / "전체_요약"
     overall_dir.mkdir(parents=True, exist_ok=True)
     overall_path = overall_dir / f"TAU2_전체요약_{ts}.xlsx"
-    generate_report(output_path=overall_path, model_filter=None, base_dir=base_dir)
+    generate_report(output_path=overall_path, model_filter=None, base_dir=base_dir, models_mapping_override=models_mapping)
 
     # 2) 모델별
     by_model_root = results_root / "모델별"
     by_model_root.mkdir(parents=True, exist_ok=True)
-    for llm, label in LLM_TO_LABEL.items():
+
+    # prune: 이번 입력에 없는 모델 폴더는 제거(누적/잔존 폴더로 인한 혼란 방지)
+    if base_dir and base_dir.exists() and not args.all_models:
+        keep = {sanitize_folder_name(v) for v in models_mapping.values()}
+        for child in by_model_root.iterdir():
+            if child.is_dir() and child.name not in keep:
+                try:
+                    # 파이썬 3.13+ Path.unlink/mkdir만으로는 재귀삭제가 번거로워서 rmtree 사용
+                    import shutil
+
+                    shutil.rmtree(child)
+                except Exception:
+                    pass
+
+    for llm, label in models_mapping.items():
         folder = by_model_root / sanitize_folder_name(label)
         folder.mkdir(parents=True, exist_ok=True)
         out = folder / f"TAU2_{sanitize_folder_name(label)}_{ts}.xlsx"
-        generate_report(output_path=out, model_filter=llm, base_dir=base_dir)
+        generate_report(output_path=out, model_filter=llm, base_dir=base_dir, models_mapping_override=models_mapping)
 
     # 안내 파일
     (results_root / "README.txt").write_text(

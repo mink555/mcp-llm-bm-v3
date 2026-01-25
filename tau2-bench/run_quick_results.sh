@@ -1,5 +1,6 @@
 #!/bin/bash
 # 퀵 검증: 5개 모델을 아주 작게(도메인 1개, task 1개, trial 1개) 돌리고
+# "기존 누적 결과"는 포함하지 않고, 방금 퀵으로 생성된 JSON만 모아서
 # results/ 아래에 모델별/전체_요약 리포트를 자동 생성한다.
 
 set -e
@@ -63,6 +64,12 @@ echo "[START] QUICK | domain=$DOMAIN task_set=$TASK_SET tasks=$NUM_TASKS trials=
 
 mkdir -p data/simulations
 
+# 이번 퀵 런 전용 결과 폴더(누적 결과와 분리)
+RUN_TAG="${RUN_TAG:-$(date +%Y%m%d_%H%M%S)}"
+RESULTS_ROOT="${RESULTS_ROOT:-results/quick/${RUN_TAG}}"
+RUN_SIM_DIR="${RESULTS_ROOT}/simulations"
+mkdir -p "${RUN_SIM_DIR}"
+
 for model in "${MODELS[@]}"; do
   sanitized=$(sanitize_model_name "$model")
   save_to="${sanitized}_${DOMAIN}_quick"
@@ -92,13 +99,18 @@ for model in "${MODELS[@]}"; do
     echo "  [WARN] tau2 run failed: $model (계속 진행)"
   fi
 
+  # 방금 퀵으로 생성된 JSON만 전용 폴더로 복사(리포트 입력을 이 폴더로 제한)
+  if [ -f "$out_json" ]; then
+    cp -f "$out_json" "${RUN_SIM_DIR}/"
+  fi
+
   if [ "$DELAY_SEC" != "0" ]; then
     sleep "$DELAY_SEC"
   fi
 done
 
 echo "------------------------------------------"
-echo "[REPORT] results/ 아래에 전체/모델별 엑셀 생성"
-python3 generate_reports.py --results-root results --timestamp
-echo "[DONE] results/ 확인"
+echo "[REPORT] (누적 제외) ${RESULTS_ROOT} 아래에 전체/모델별 엑셀 생성"
+python3 generate_reports.py --results-root "${RESULTS_ROOT}" --input-dir "${RUN_SIM_DIR}" --timestamp
+echo "[DONE] ${RESULTS_ROOT} 확인"
 
