@@ -422,15 +422,15 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         ws.append([None, model_name, None, None, None, None])
         
         # Pass@1: Average of Pass@1 for this model from Task별_집계
-        ws.cell(row=row_num, column=3).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!F:F),0)'
+        ws.cell(row=row_num, column=3).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!G:G),0)'
         ws.cell(row=row_num, column=3).number_format = '0.00%'
         
         # Pass@2: Average of Pass@2 for this model
-        ws.cell(row=row_num, column=4).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!G:G),0)'
+        ws.cell(row=row_num, column=4).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!H:H),0)'
         ws.cell(row=row_num, column=4).number_format = '0.00%'
         
         # Pass@4: Average of Pass@4 for this model
-        ws.cell(row=row_num, column=5).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!H:H),0)'
+        ws.cell(row=row_num, column=5).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!I:I),0)'
         ws.cell(row=row_num, column=5).number_format = '0.00%'
         # RankKey: Pass@1 > Pass@2 > Pass@4 우선, 동점은 행번호로 안정화
         ws.cell(row=row_num, column=6).value = f"=C{row_num}*1000000 + D{row_num}*1000 + E{row_num} + ROW()/1000000000"
@@ -459,6 +459,52 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.column_dimensions['C'].width = 14
     ws.column_dimensions['D'].width = 14
     ws.column_dimensions['E'].width = 14
+
+    # ===== Tool-call JSON args health section =====
+    ws.append([""])
+    ws.append(["툴콜 arguments(JSON) 안정성(=Schema mismatch 후보)"])
+    health_title_row = ws.max_row
+    ws.merge_cells(f"A{health_title_row}:F{health_title_row}")
+    ws.cell(row=health_title_row, column=1).font = styles["section"]["font"]
+
+    ws.append(
+        [
+            "정의: assistant tool_calls의 원본 raw_data에서 function.arguments가 빈 문자열/깨진 JSON이면 오류로 집계(실패를 완화하지 않고, 실패 원인을 투명하게 비교하기 위한 지표)."
+        ]
+    )
+    health_desc_row = ws.max_row
+    ws.merge_cells(f"A{health_desc_row}:O{health_desc_row}")
+    ws.cell(row=health_desc_row, column=1).alignment = Alignment(
+        horizontal="left", vertical="center", wrap_text=True
+    )
+    ws.row_dimensions[health_desc_row].height = 36
+
+    ws.append(["모델", "런 수", "오류 런 수", "오류율", "런당 평균 오류수", "비고"])
+    health_header_row = ws.max_row
+    for col_idx, cell in enumerate(ws[health_header_row], 1):
+        cell.font = styles["header"]["font"]
+        cell.fill = styles["header"]["fill"]
+        cell.alignment = styles["header"]["align"]
+        cell.border = styles["header"]["border"]
+
+    for model_name in models_mapping.values():
+        r = ws.max_row + 1
+        ws.append([model_name, None, None, None, None, ""])
+        # 런 시트 기준: B=모델, T=ToolArgsJSONErrorCount(hidden)
+        ws.cell(r, 2).value = f'=COUNTIF(런!$B:$B, $A{r})'
+        ws.cell(r, 3).value = f'=COUNTIFS(런!$B:$B, $A{r}, 런!$T:$T, ">0")'
+        ws.cell(r, 4).value = f"=IFERROR(C{r}/B{r},0)"
+        ws.cell(r, 4).number_format = "0.00%"
+        ws.cell(r, 5).value = f'=IFERROR(AVERAGEIFS(런!$T:$T, 런!$B:$B, $A{r}),0)'
+        ws.cell(r, 5).number_format = "0.00"
+        for cc in range(1, 6 + 1):
+            cell = ws.cell(r, cc)
+            cell.border = styles["data"]["border"]
+            cell.alignment = (
+                styles["data_center"]["align"]
+                if cc in [2, 3, 4, 5]
+                else styles["data"]["align"]
+            )
 
     # ===== Domain matrix section =====
     ws.append([""])
@@ -515,11 +561,11 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         ws.cell(r, 1).alignment = styles["data"]["align"]
         col = 2
         for _k, model_name in models_mapping.items():
-            ws.cell(r, col).value = f'=IFERROR(AVERAGEIFS(Task별_집계!F:F, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
+            ws.cell(r, col).value = f'=IFERROR(AVERAGEIFS(Task별_집계!G:G, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
             ws.cell(r, col).number_format = "0.00%"
-            ws.cell(r, col+1).value = f'=IFERROR(AVERAGEIFS(Task별_집계!G:G, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
+            ws.cell(r, col+1).value = f'=IFERROR(AVERAGEIFS(Task별_집계!H:H, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
             ws.cell(r, col+1).number_format = "0.00%"
-            ws.cell(r, col+2).value = f'=IFERROR(AVERAGEIFS(Task별_집계!H:H, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
+            ws.cell(r, col+2).value = f'=IFERROR(AVERAGEIFS(Task별_집계!I:I, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
             ws.cell(r, col+2).number_format = "0.00%"
             for cc in [col, col+1, col+2]:
                 c = ws.cell(r, cc)
@@ -551,7 +597,7 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         col += 3
 
     # Freeze header for the sheet top (ranking)
-    ws.freeze_panes = "A7"
+    ws.freeze_panes = f"A{header_row+1}"
 
 
 def create_runs_sheet(wb, runs, styles):
