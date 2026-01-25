@@ -639,6 +639,26 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.column_dimensions["B"].width = max(ws.column_dimensions["B"].width or 40, 26)
     ws.column_dimensions["C"].width = max(ws.column_dimensions["C"].width or 14, 26)
     ws.column_dimensions["D"].width = max(ws.column_dimensions["D"].width or 14, 54)
+
+    # ===== 집계 흐름(스코어 계산) 다이어그램 =====
+    ws.append([""])
+    ws.append(["스코어 집계 흐름(Trial → Task → Domain → Overall)"])
+    flow_title_row = ws.max_row
+    ws.merge_cells(f"A{flow_title_row}:O{flow_title_row}")
+    ws.cell(row=flow_title_row, column=1).font = styles["section"]["font"]
+
+    flow_lines = [
+        "1) Trial(대화 1회) → PASS(0/1): reward=1.0이면 PASS, 아니면 FAIL",
+        "2) Task(같은 Task를 n번 반복) → Pass^k: COMBIN(성공횟수 c, k) / COMBIN(총시행 n, k)",
+        "3) Domain → 해당 도메인의 Task들의 Pass^k 평균(매크로 평균)",
+        "4) Overall → 도메인(Retail/Airline/Telecom) 점수의 평균(동일 가중치)",
+        "엑셀 기준: 런(원천) → Task별_집계(숨김, Pass^k 계산) → 요약(도메인/Overall 평균)",
+    ]
+    ws.append(["\n".join(flow_lines)])
+    flow_desc_row = ws.max_row
+    ws.merge_cells(f"A{flow_desc_row}:O{flow_desc_row}")
+    ws.cell(row=flow_desc_row, column=1).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.row_dimensions[flow_desc_row].height = 84
     
     ws.append([""])
     
