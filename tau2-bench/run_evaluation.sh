@@ -91,7 +91,7 @@ PY
 echo "Starting TAU2-Bench Evaluation..."
 echo "Trials: $NUM_TRIALS | Temp: $TEMP | MaxTokens: $MAX_TOKENS | Resume: $RESUME | Force: $FORCE"
 
-mkdir -p results
+mkdir -p results/latest
 
 for model in "${MODELS[@]}"; do
     sanitized=$(sanitize_model_name "$model")
@@ -160,16 +160,16 @@ for model in "${MODELS[@]}"; do
         fi
     done
     
-    # 전체/모델별 리포트(폴더 구조 통일 + latest만 유지 + 오래된 타임스탬프 산출물 정리)
-    if ! python3 generate_reports.py --results-root results --prune; then
+    # 전체/모델별 리포트(경로 고정: results/latest)
+    if ! python3 generate_reports.py --results-root results/latest --prune; then
         echo "  [WARN] generate_reports.py failed. Continuing."
     else
-        echo "  Reports updated under: results/"
+        echo "  Reports updated under: results/latest/"
     fi
 done
 
 echo "------------------------------------------"
 echo "Evaluation Complete."
 echo "Final Reports:"
-echo "  - results/전체_요약/TAU2_전체요약_latest.xlsx"
-echo "  - results/모델별/<모델라벨>/TAU2_<모델라벨>_latest.xlsx"
+echo "  - results/latest/전체_요약/TAU2_전체요약_latest.xlsx"
+echo "  - results/latest/모델별/<모델라벨>/TAU2_<모델라벨>_latest.xlsx"

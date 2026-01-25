@@ -64,18 +64,13 @@ echo "[START] QUICK | domain=$DOMAIN task_set=$TASK_SET tasks=$NUM_TASKS trials=
 
 mkdir -p data/simulations
 
-# 이번 퀵 런 전용 결과 폴더(누적 결과와 분리)
-# - 기본은 항상 latest로 덮어쓰기(경로 난립 방지)
-# - 히스토리가 필요하면 RUN_TAG를 직접 지정: RUN_TAG=20260126_010101 ./run_quick_results.sh
-RUN_TAG="${RUN_TAG:-latest}"
-RESULTS_ROOT="${RESULTS_ROOT:-results/quick/${RUN_TAG}}"
+# 결과 경로를 하나로 강하게 고정: results/latest
+RESULTS_ROOT="${RESULTS_ROOT:-results/latest}"
 RUN_SIM_DIR="${RESULTS_ROOT}/simulations"
 mkdir -p "${RUN_SIM_DIR}"
 
-# latest 모드에서는 이전 퀵 JSON을 정리(이번 런만 남기기)
-if [ "$RUN_TAG" = "latest" ]; then
-  rm -f "${RUN_SIM_DIR}"/*.json 2>/dev/null || true
-fi
+# 이전 퀵 JSON 정리(이번 런만 남기기)
+rm -f "${RUN_SIM_DIR}"/*.json 2>/dev/null || true
 
 for model in "${MODELS[@]}"; do
   sanitized=$(sanitize_model_name "$model")
@@ -117,7 +112,7 @@ for model in "${MODELS[@]}"; do
 done
 
 echo "------------------------------------------"
-echo "[REPORT] (누적 제외) ${RESULTS_ROOT} 아래에 전체/모델별 엑셀 생성 (latest만)"
+echo "[REPORT] (누적 제외) ${RESULTS_ROOT} 아래에 전체/모델별 엑셀 생성"
 python3 generate_reports.py --results-root "${RESULTS_ROOT}" --input-dir "${RUN_SIM_DIR}" --prune
-echo "[DONE] ${RESULTS_ROOT} 확인"
+echo "[DONE] ${RESULTS_ROOT} 확인 (results/latest/)"
 

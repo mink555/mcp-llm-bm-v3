@@ -8,7 +8,6 @@ results/ 폴더 아래에
 
 import argparse
 from pathlib import Path
-from datetime import datetime
 
 import json
 
@@ -40,10 +39,7 @@ def detect_llms_in_input_dir(input_dir: Path) -> set[str]:
 
 
 def prune_old_reports(results_root: Path) -> None:
-    """
-    results_root 하위에서 *_latest.xlsx를 제외한 TAU2_*.xlsx(타임스탬프 산출물)을 정리.
-    - 사용자가 경로 난립을 싫어할 때 기본으로 깔끔하게 유지하기 위한 유틸
-    """
+    """호환용 정리 유틸: *_latest.xlsx를 제외한 TAU2_*.xlsx 산출물을 제거."""
     for fp in results_root.rglob("TAU2_*.xlsx"):
         name = fp.name
         if name.endswith("_latest.xlsx"):
@@ -57,9 +53,8 @@ def prune_old_reports(results_root: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--results-root", type=str, default="results", help="결과 폴더 루트(기본: results)")
+    ap.add_argument("--results-root", type=str, default="results/latest", help="결과 폴더 루트(기본: results/latest)")
     ap.add_argument("--input-dir", type=str, default=None, help="시뮬레이션 json 폴더(기본: data/simulations 자동 탐색)")
-    ap.add_argument("--timestamp", action="store_true", help="추가로 타임스탬프 파일도 생성(기본은 latest만 생성)")
     ap.add_argument(
         "--all-models",
         action="store_true",
@@ -75,8 +70,6 @@ def main() -> None:
     results_root = Path(args.results_root)
     base_dir = Path(args.input_dir) if args.input_dir else None
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
     # 기본: 입력 폴더에 실제로 존재하는 모델만 리포트 생성(불필요한 빈 파일 생성 방지)
     models_mapping = dict(LLM_TO_LABEL)
     if base_dir and base_dir.exists() and not args.all_models:
@@ -88,13 +81,6 @@ def main() -> None:
     overall_dir.mkdir(parents=True, exist_ok=True)
     overall_latest = overall_dir / "TAU2_전체요약_latest.xlsx"
     generate_report(output_path=overall_latest, model_filter=None, base_dir=base_dir, models_mapping_override=models_mapping)
-    if args.timestamp:
-        overall_ts = overall_dir / f"TAU2_전체요약_{ts}.xlsx"
-        try:
-            import shutil
-            shutil.copy2(overall_latest, overall_ts)
-        except Exception:
-            pass
 
     # 2) 모델별
     by_model_root = results_root / "모델별"
@@ -118,13 +104,6 @@ def main() -> None:
         folder.mkdir(parents=True, exist_ok=True)
         out_latest = folder / f"TAU2_{sanitize_folder_name(label)}_latest.xlsx"
         generate_report(output_path=out_latest, model_filter=llm, base_dir=base_dir, models_mapping_override=models_mapping)
-        if args.timestamp:
-            out_ts = folder / f"TAU2_{sanitize_folder_name(label)}_{ts}.xlsx"
-            try:
-                import shutil
-                shutil.copy2(out_latest, out_ts)
-            except Exception:
-                pass
 
     # 안내 파일
     (results_root / "README.txt").write_text(
@@ -138,7 +117,7 @@ def main() -> None:
                 "- '런' 시트에서 PASS/FAIL, 도메인, TaskID로 필터링",
                 "- tool_calls / tool 결과는 숨김 컬럼을 펼쳐서 확인",
                 "",
-                f"생성 키워드: {ts}",
+                "생성 모드: latest (항상 덮어쓰기)",
                 "",
             ]
         ),
@@ -149,8 +128,6 @@ def main() -> None:
         prune_old_reports(results_root)
 
     print(f"[OK] 전체 요약(latest): {overall_latest}")
-    if args.timestamp:
-        print(f"[OK] 전체 요약(timestamp): {overall_dir / f'TAU2_전체요약_{ts}.xlsx'}")
     print(f"[OK] 모델별 폴더: {by_model_root}")
 
 
