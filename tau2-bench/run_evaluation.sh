@@ -37,7 +37,7 @@ for model in "${MODELS[@]}"; do
         # Ensure clean run
         rm -f "data/simulations/${sanitized}_${domain}.json" 2>/dev/null
         
-        tau2 run \
+        if ! tau2 run \
             --domain "$domain" \
             --agent-llm "$model" \
             --agent-llm-args "{\"temperature\": $TEMP}" \
@@ -46,7 +46,9 @@ for model in "${MODELS[@]}"; do
             --num-trials "$NUM_TRIALS" \
             --save-to "${sanitized}_${domain}" \
             --max-concurrency 3 \
-            --log-level ERROR
+            --log-level ERROR; then
+            echo "  [WARN] tau2 run failed (model=$model domain=$domain). Continuing."
+        fi
 
         # provider rate-limit/용량 이슈 완화용
         if [ "$DELAY_SEC" != "0" ]; then
@@ -55,7 +57,9 @@ for model in "${MODELS[@]}"; do
     done
     
     # Generate intermediate report
-    python3 generate_excel_report.py
+    if ! python3 generate_excel_report.py; then
+        echo "  [WARN] generate_excel_report.py failed. Continuing."
+    fi
     echo "  Intermediate report updated."
 done
 

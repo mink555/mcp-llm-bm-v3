@@ -1,5 +1,6 @@
 import json
 import re
+import ast
 from typing import Any, Optional
 
 import litellm
@@ -231,14 +232,21 @@ def generate(
     )
     content = response.message.content
     tool_calls = response.message.tool_calls or []
-    tool_calls = [
-        ToolCall(
-            id=tool_call.id,
-            name=tool_call.function.name,
-            arguments=json.loads(tool_call.function.arguments),
+    parsed_tool_calls: list[ToolCall] = []
+    for tool_call in tool_calls:
+        tool_name = tool_call.function.name
+        tool_call_id = tool_call.id
+        raw_args = tool_call.function.arguments
+        parsed_tool_calls.append(
+            ToolCall(
+                id=tool_call_id,
+                name=tool_name,
+                arguments=_safe_parse_tool_arguments(
+                    raw_args, tool_name=tool_name, tool_call_id=tool_call_id
+                ),
+            )
         )
-        for tool_call in tool_calls
-    ]
+    tool_calls = parsed_tool_calls
     tool_calls = tool_calls or None
 
     message = AssistantMessage(
@@ -250,6 +258,55 @@ def generate(
         raw_data=response.to_dict(),
     )
     return message
+
+
+def _safe_parse_tool_arguments(raw_arguments: Any, *, tool_name: str, tool_call_id: str) -> dict:
+    """
+    Tool calling 인자의 JSON 파싱이 깨져도 전체 시뮬레이션이 크래시하지 않도록 방어합니다.
+
+    OpenRouter/일부 모델에서 `tool_call.function.arguments`가 빈 문자열이거나 JSON이 아닌 형태로
+    내려오는 경우가 있어, 그대로 `json.loads()`를 호출하면 JSONDecodeError로 평가가 중단됩니다.
+    """
+    # LiteLLM 타입/모델별로 arguments가 None, "", dict 등으로 올 수 있음
+    if raw_arguments is None:
+        return {}
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+
+    s = str(raw_arguments).strip()
+    if s == "" or s.lower() in {"null", "none"}:
+        logger.warning(
+            f"Tool call args empty for tool={tool_name} id={tool_call_id}; treating as empty dict"
+        )
+        return {}
+
+    # 1) strict JSON
+    try:
+        parsed = json.loads(s)
+        return parsed if isinstance(parsed, dict) else {"_args": parsed}
+    except Exception:
+        pass
+
+    # 2) python-literal(dict) fallback (e.g. single quotes)
+    try:
+        parsed = ast.literal_eval(s)
+        return parsed if isinstance(parsed, dict) else {"_args": parsed}
+    except Exception:
+        pass
+
+    # 3) last-resort heuristic: wrap key:value pairs without braces
+    if not s.startswith("{") and ":" in s:
+        candidate = "{" + s + "}"
+        try:
+            parsed = json.loads(candidate)
+            return parsed if isinstance(parsed, dict) else {"_args": parsed}
+        except Exception:
+            pass
+
+    logger.warning(
+        f"Failed to parse tool call args for tool={tool_name} id={tool_call_id}. raw={s!r}. Using empty dict."
+    )
+    return {}
 
 
 def get_cost(messages: list[Message]) -> tuple[float, float] | None:
