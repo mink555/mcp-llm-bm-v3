@@ -160,8 +160,8 @@ for model in "${MODELS[@]}"; do
         fi
     done
     
-    # 전체/모델별 리포트(폴더 구조 통일: results/전체_요약 + results/모델별/<라벨>)
-    if ! python3 generate_reports.py --results-root results; then
+    # 전체/모델별 리포트(폴더 구조 통일 + latest만 유지 + 오래된 타임스탬프 산출물 정리)
+    if ! python3 generate_reports.py --results-root results --prune; then
         echo "  [WARN] generate_reports.py failed. Continuing."
     else
         echo "  Reports updated under: results/"

@@ -39,22 +39,43 @@ def detect_llms_in_input_dir(input_dir: Path) -> set[str]:
     return llms
 
 
+def prune_old_reports(results_root: Path) -> None:
+    """
+    results_root 하위에서 *_latest.xlsx를 제외한 TAU2_*.xlsx(타임스탬프 산출물)을 정리.
+    - 사용자가 경로 난립을 싫어할 때 기본으로 깔끔하게 유지하기 위한 유틸
+    """
+    for fp in results_root.rglob("TAU2_*.xlsx"):
+        name = fp.name
+        if name.endswith("_latest.xlsx"):
+            continue
+        # 안전: TAU2_ 접두어 + xlsx만 정리
+        try:
+            fp.unlink()
+        except Exception:
+            pass
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--results-root", type=str, default="results", help="결과 폴더 루트(기본: results)")
     ap.add_argument("--input-dir", type=str, default=None, help="시뮬레이션 json 폴더(기본: data/simulations 자동 탐색)")
-    ap.add_argument("--timestamp", action="store_true", help="파일명에 타임스탬프를 붙임")
+    ap.add_argument("--timestamp", action="store_true", help="추가로 타임스탬프 파일도 생성(기본은 latest만 생성)")
     ap.add_argument(
         "--all-models",
         action="store_true",
         help="입력에 없는 모델도 포함해(빈 리포트라도) 5개 모델 전부 생성",
+    )
+    ap.add_argument(
+        "--prune",
+        action="store_true",
+        help="results-root 하위의 타임스탬프 엑셀(TAU2_*.xlsx, *_latest.xlsx 제외)을 정리",
     )
     args = ap.parse_args()
 
     results_root = Path(args.results_root)
     base_dir = Path(args.input_dir) if args.input_dir else None
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S") if args.timestamp else "latest"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 기본: 입력 폴더에 실제로 존재하는 모델만 리포트 생성(불필요한 빈 파일 생성 방지)
     models_mapping = dict(LLM_TO_LABEL)
@@ -65,8 +86,15 @@ def main() -> None:
     # 1) 전체 요약
     overall_dir = results_root / "전체_요약"
     overall_dir.mkdir(parents=True, exist_ok=True)
-    overall_path = overall_dir / f"TAU2_전체요약_{ts}.xlsx"
-    generate_report(output_path=overall_path, model_filter=None, base_dir=base_dir, models_mapping_override=models_mapping)
+    overall_latest = overall_dir / "TAU2_전체요약_latest.xlsx"
+    generate_report(output_path=overall_latest, model_filter=None, base_dir=base_dir, models_mapping_override=models_mapping)
+    if args.timestamp:
+        overall_ts = overall_dir / f"TAU2_전체요약_{ts}.xlsx"
+        try:
+            import shutil
+            shutil.copy2(overall_latest, overall_ts)
+        except Exception:
+            pass
 
     # 2) 모델별
     by_model_root = results_root / "모델별"
@@ -88,8 +116,15 @@ def main() -> None:
     for llm, label in models_mapping.items():
         folder = by_model_root / sanitize_folder_name(label)
         folder.mkdir(parents=True, exist_ok=True)
-        out = folder / f"TAU2_{sanitize_folder_name(label)}_{ts}.xlsx"
-        generate_report(output_path=out, model_filter=llm, base_dir=base_dir, models_mapping_override=models_mapping)
+        out_latest = folder / f"TAU2_{sanitize_folder_name(label)}_latest.xlsx"
+        generate_report(output_path=out_latest, model_filter=llm, base_dir=base_dir, models_mapping_override=models_mapping)
+        if args.timestamp:
+            out_ts = folder / f"TAU2_{sanitize_folder_name(label)}_{ts}.xlsx"
+            try:
+                import shutil
+                shutil.copy2(out_latest, out_ts)
+            except Exception:
+                pass
 
     # 안내 파일
     (results_root / "README.txt").write_text(
@@ -110,7 +145,12 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print(f"[OK] 전체 요약: {overall_path}")
+    if args.prune:
+        prune_old_reports(results_root)
+
+    print(f"[OK] 전체 요약(latest): {overall_latest}")
+    if args.timestamp:
+        print(f"[OK] 전체 요약(timestamp): {overall_dir / f'TAU2_전체요약_{ts}.xlsx'}")
     print(f"[OK] 모델별 폴더: {by_model_root}")
 
 
