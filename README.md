@@ -58,6 +58,89 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
 - 툴 호출이 누락되거나 잘못됨  
 - 상태가 기대값에 도달하지 못함
 
+---
+
+## 실제 JSON 샘플 (telecom 1회 실행 발췌)
+
+아래는 `data/simulations/mistral_small_telecom_one.json`에서 **요청/GT/모델 응답을 그대로** 추출한 예시입니다.
+
+```json
+{
+  "task_id": "[mobile_data_issue]airplane_mode_on|user_abroad_roaming_enabled_off[PERSONA:None]",
+  "request": {
+    "reason_for_call": "You mobile data is not working properly. It either stops working or is very slow. You want to fix it and absolutely want to get excellent internet speed on your phone. You are not willing to accept any other internet speed (poor, fair or good). You do not have access to wifi.",
+    "known_info": "You are John Smith with phone number 555-123-2002. You are currently abroad in France.",
+    "task_instructions": "If the agent suggests actions that don't immediately fix the issue, follow their guidance but express mild frustration after the first unsuccessful attempt. You will consider the issue resolved only when speed test returns excellent internet speed and nothing else. If it returns poor, fair or good, you will not consider the issue resolved. You are willing to refuel 2.0 GB of data if necessary, but you do not want to change your mobile data plan. If the tool call does not return updated status information, you might need to perform another tool call to get the updated status. \nWhenever the agent asks you about your device, always ground your responses on the results of tool calls. \nFor example: If the agent asks what the status bar shows, always ground your response on the results of the `get_status_bar` tool call. If the agent asks if you are able to send an MMS message, always ground your response on the results of the `can_send_mms` tool call.\nNever make up the results of tool calls, always ground your responses on the results of tool calls.\nIf you are unsure about whether an action is necessary, always ask the agent for clarification.\n"
+  },
+  "gt": {
+    "actions": [
+      {
+        "action_id": "toggle_airplane_mode_0",
+        "requestor": "user",
+        "name": "toggle_airplane_mode",
+        "arguments": {},
+        "info": null,
+        "compare_args": null
+      },
+      {
+        "action_id": "toggle_roaming_1",
+        "requestor": "user",
+        "name": "toggle_roaming",
+        "arguments": {},
+        "info": null,
+        "compare_args": null
+      }
+    ],
+    "env_assertions": [
+      {
+        "env_type": "user",
+        "func_name": "assert_mobile_data_status",
+        "arguments": {
+          "expected_status": true
+        },
+        "assert_value": true,
+        "message": null
+      },
+      {
+        "env_type": "user",
+        "func_name": "assert_internet_speed",
+        "arguments": {
+          "expected_speed": 200,
+          "expected_desc": "excellent"
+        },
+        "assert_value": true,
+        "message": null
+      }
+    ]
+  },
+  "model_response": "[TOOL_CALLStransfer_to_human_agents[ARGS{\"summary\": \"User is experiencing slow mobile data speeds while abroad in France. They have a 10.0 GB data plan and are not interested in changing it. Basic troubleshooting steps have been attempted without success. The user requires excellent internet speed for their needs.\"}",
+  "model_tool_calls": null
+}
+```
+
+**이 샘플에서의 판단 포인트**
+- `model_tool_calls`가 **null**이면 실제 툴 호출이 발생하지 않습니다.  
+- 평가 기준(`gt.actions`, `gt.env_assertions`)은 **툴 호출/상태 변화가 전제**이므로, 이 경우 **FAIL**로 처리됩니다.
+
+---
+
+## 모델별 툴콜/검증 결과 비교표 (telecom 1회 샘플)
+
+아래는 telecom 결과 JSON의 첫 번째 trial 기준 요약입니다.  
+`assistant tool_calls 수`가 0이면 **모델이 구조화된 툴 호출을 내지 못한 것**을 의미합니다.
+
+| 모델 | assistant tool_calls 수 | user tool_calls 수 | Action Checks(성공/전체) | Env Assertions(성공/전체) | Reward |
+|---|---:|---:|---|---|---:|
+| openrouter/meta-llama/llama-3.3-70b-instruct | 0 | 5 | 2/2 | 2/2 | 1.0 |
+| openrouter/mistralai/mistral-small-3.2-24b-instruct | 0 | 0 | 0/2 | 0/2 | 0.0 |
+| openrouter/qwen/qwen3-32b | 실행 결과 없음 | - | - | - | - |
+| openrouter/qwen/qwen3-14b | 실행 결과 없음 | - | - | - | - |
+| openrouter/qwen/qwen3-next-80b-a3b-instruct | 실행 결과 없음 | - | - | - | - |
+
+**해석 팁**
+- `Action Checks`는 **requestor가 user/assistant인지**에 따라 실행 주체가 달라질 수 있습니다.  
+- 이 표는 “툴콜이 실제로 들어왔는지(assistant tool_calls 수)”와 “평가 기준이 충족됐는지”를 분리해서 보여줍니다.
+
 ## 평가 카테고리(도메인)
 
 - **Retail**: 주문 조회/반품/교환/주소·결제 변경 등 전자상거래 고객센터 업무
