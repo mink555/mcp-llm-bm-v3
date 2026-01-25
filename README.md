@@ -250,29 +250,15 @@ export OPENROUTER_API_KEY="YOUR_KEY"
 | **초고속 1개 테스트(telecom)** | `cd tau2-bench`<br>`export OPENROUTER_API_KEY="YOUR_KEY"`<br>`tau2 run --domain telecom --agent-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --user-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --num-trials 1 --num-tasks 1 --max-concurrency 1 --log-level ERROR` | 1개 태스크에서 **툴 호출이 실제로 나오는지**, 통신이 되는지 |
 | **엑셀 리포트 생성** | `cd tau2-bench`<br>`python3 generate_excel_report.py` | 요청/GT/모델 응답/FAIL 원인을 리포트로 확인 |
 | **5개 모델 × 3도메인 전체 평가** | `cd tau2-bench`<br>`./run_evaluation.sh` | 전체 Pass^k/도메인 성능 비교 |
-| **OpenRouter provider 고정(툴콜 정상화)** | `cd tau2-bench`<br>`OPENROUTER_PROVIDER_ORDER="Mistral" OPENROUTER_ALLOW_FALLBACKS=0 ./run_evaluation.sh` | provider 라우팅을 고정해 **tool_calls 구조화가 깨지는 문제** 회피 |
+| **OpenRouter 기본 라우팅 사용** | `cd tau2-bench`<br>`./run_evaluation.sh` | OpenRouter 기본 라우팅으로 실행 |
 
 ### 짧은 해석 포인트
 - **툴콜이 실제로 들어오면** `Action Checks`가 ✅로 올라가기 시작합니다.  
 - **툴콜이 text로만 나오면** `tool_calls`가 비어 있어 **FAIL**로 찍히는 게 정상입니다.  
 - 따라서 **OpenRouter provider 라우팅이 툴콜 품질에 큰 영향**을 줍니다.
 
-### 모델별 provider 고정(권장)
-아래는 **tool_calls가 구조화로 잘 들어오는 provider**를 빠르게 확인한 결과입니다.  
-이 값을 `OPENROUTER_PROVIDER_MAP`으로 고정하면 **유효성 오류 없이 모델 실력 비교**가 가능합니다.
-
-```bash
-cd tau2-bench
-export OPENROUTER_PROVIDER_MAP='{
-  "openrouter/meta-llama/llama-3.3-70b-instruct": ["Inceptron"],
-  "openrouter/mistralai/mistral-small-3.2-24b-instruct": ["Mistral"],
-  "openrouter/qwen/qwen3-32b": ["Chutes"],
-  "openrouter/qwen/qwen3-14b": ["Chutes"],
-  "openrouter/qwen/qwen3-next-80b-a3b-instruct": ["DeepInfra"]
-}'
-export OPENROUTER_ALLOW_FALLBACKS=0
-./run_evaluation.sh
-```
+### 참고
+- OpenRouter는 기본적으로 provider를 자동 라우팅합니다.
 
 ## 평가 대상 모델(요청하신 5개)
 

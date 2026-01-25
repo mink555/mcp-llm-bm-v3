@@ -43,18 +43,7 @@ TEMP=0.0
 # OpenRouter 402(크레딧/토큰 부족) 방지용: max_tokens 상한(기본 4096)
 # 필요하면 실행 시 `MAX_TOKENS=2048` 처럼 조절
 MAX_TOKENS="${MAX_TOKENS:-4096}"
-# OpenRouter provider 라우팅 고정(옵션)
-# 예: OPENROUTER_PROVIDER_ORDER="Fireworks,OpenAI" 처럼 콤마 구분
-# 필요하면 OPENROUTER_ALLOW_FALLBACKS=0 으로 폴백 금지
-OPENROUTER_PROVIDER_ORDER="${OPENROUTER_PROVIDER_ORDER:-}"
-OPENROUTER_ALLOW_FALLBACKS="${OPENROUTER_ALLOW_FALLBACKS:-true}"
-# 모델별 provider 고정(옵션, JSON)
-# 예:
-# OPENROUTER_PROVIDER_MAP='{
-#   "openrouter/mistralai/mistral-small-3.2-24b-instruct": ["Mistral"],
-#   "openrouter/qwen/qwen3-32b": ["Fireworks","DeepInfra"]
-# }'
-OPENROUTER_PROVIDER_MAP="${OPENROUTER_PROVIDER_MAP:-{}}"
+# OpenRouter 라우팅은 기본 동작 사용(추가 provider 고정 로직 없음)
 # OpenRouter API 안정화를 위한 호출 간 딜레이(초). 기본 1초.
 # 필요하면 실행 시 `DELAY_SEC=0` 또는 `DELAY_SEC=2`처럼 조절.
 DELAY_SEC="${DELAY_SEC:-1}"
@@ -87,57 +76,20 @@ PY
 }
 
 build_llm_args() {
-    # shell vars -> json (global provider order)
-    TEMP_ENV="$TEMP" MAX_TOKENS_ENV="$MAX_TOKENS" OPENROUTER_PROVIDER_ORDER_ENV="$OPENROUTER_PROVIDER_ORDER" OPENROUTER_ALLOW_FALLBACKS_ENV="$OPENROUTER_ALLOW_FALLBACKS" \
+    # shell vars -> json
+    TEMP_ENV="$TEMP" MAX_TOKENS_ENV="$MAX_TOKENS" \
     python3 - <<'PY'
 import json, os
 args = {
     "temperature": float(os.environ["TEMP_ENV"]),
     "max_tokens": int(os.environ["MAX_TOKENS_ENV"]),
 }
-order = os.environ.get("OPENROUTER_PROVIDER_ORDER_ENV", "").strip()
-if order:
-    allow = os.environ.get("OPENROUTER_ALLOW_FALLBACKS_ENV", "true").lower() not in ("0","false","no")
-    args["provider"] = {
-        "order": [o.strip() for o in order.split(",") if o.strip()],
-        "allow_fallbacks": allow,
-    }
-print(json.dumps(args))
-PY
-}
-
-build_llm_args_for_model() {
-    # shell vars -> json (per-model provider map 우선)
-    MODEL_ENV="$1" TEMP_ENV="$TEMP" MAX_TOKENS_ENV="$MAX_TOKENS" OPENROUTER_PROVIDER_MAP_ENV="$OPENROUTER_PROVIDER_MAP" OPENROUTER_PROVIDER_ORDER_ENV="$OPENROUTER_PROVIDER_ORDER" OPENROUTER_ALLOW_FALLBACKS_ENV="$OPENROUTER_ALLOW_FALLBACKS" \
-    python3 - <<'PY'
-import json, os
-args = {
-    "temperature": float(os.environ["TEMP_ENV"]),
-    "max_tokens": int(os.environ["MAX_TOKENS_ENV"]),
-}
-model = os.environ["MODEL_ENV"]
-allow = os.environ.get("OPENROUTER_ALLOW_FALLBACKS_ENV", "true").lower() not in ("0","false","no")
-provider_map_raw = os.environ.get("OPENROUTER_PROVIDER_MAP_ENV", "{}")
-try:
-    provider_map = json.loads(provider_map_raw)
-except Exception:
-    provider_map = {}
-order = provider_map.get(model)
-if order:
-    args["provider"] = {"order": order, "allow_fallbacks": allow}
-else:
-    order_str = os.environ.get("OPENROUTER_PROVIDER_ORDER_ENV", "").strip()
-    if order_str:
-        args["provider"] = {"order": [o.strip() for o in order_str.split(",") if o.strip()], "allow_fallbacks": allow}
 print(json.dumps(args))
 PY
 }
 
 echo "Starting TAU2-Bench Evaluation..."
 echo "Trials: $NUM_TRIALS | Temp: $TEMP | MaxTokens: $MAX_TOKENS | Resume: $RESUME | Force: $FORCE"
-if [ -n "$OPENROUTER_PROVIDER_ORDER" ]; then
-    echo "OpenRouter Provider Order: $OPENROUTER_PROVIDER_ORDER (fallbacks=$OPENROUTER_ALLOW_FALLBACKS)"
-fi
 
 for model in "${MODELS[@]}"; do
     sanitized=$(sanitize_model_name "$model")
@@ -167,8 +119,8 @@ for model in "${MODELS[@]}"; do
             exit 1
         fi
 
-        # LLM args 구성(temperature + max_tokens + provider routing)
-        AGENT_ARGS="$(build_llm_args_for_model "$model")"
+        # LLM args 구성(temperature + max_tokens)
+        AGENT_ARGS="$(build_llm_args)"
         USER_ARGS="$AGENT_ARGS"
 
         # 파일이 있으면 tau2가 resume 질문을 함 → 비대화형으로 자동 y 입력(2번 넣어서 2회 프롬프트까지 대비)
