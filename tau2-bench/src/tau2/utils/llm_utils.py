@@ -1,6 +1,7 @@
 import json
 import re
 import ast
+import uuid
 from typing import Any, Optional
 
 import litellm
@@ -149,7 +150,6 @@ def to_litellm_messages(messages: list[Message]) -> list[dict]:
                 tool_calls = [
                     {
                         "id": tc.id,
-                        "name": tc.name,
                         "function": {
                             "name": tc.name,
                             "arguments": json.dumps(tc.arguments),
@@ -249,6 +249,21 @@ def generate(
     tool_calls = parsed_tool_calls
     tool_calls = tool_calls or None
 
+    # Fallback: providers sometimes return tool calls as text like "[TOOL_CALLS...]" with tool_calls=None
+    if tool_calls is None and isinstance(content, str):
+        parsed = _parse_text_tool_call(content)
+        if parsed:
+            tool_name, tool_args = parsed
+            tool_calls = [
+                ToolCall(
+                    id=f"text-{uuid.uuid4().hex[:8]}",
+                    name=tool_name,
+                    arguments=tool_args,
+                )
+            ]
+            # enforce "tool call OR content" rule
+            content = None
+
     message = AssistantMessage(
         role="assistant",
         content=content,
@@ -307,6 +322,44 @@ def _safe_parse_tool_arguments(raw_arguments: Any, *, tool_name: str, tool_call_
         f"Failed to parse tool call args for tool={tool_name} id={tool_call_id}. raw={s!r}. Using empty dict."
     )
     return {}
+
+
+def _parse_text_tool_call(content: str) -> tuple[str, dict] | None:
+    """
+    Parse tool call from text like "[TOOL_CALLS<name>[ARGS{...}".
+    Best-effort fallback for providers that return tool calls as plain text.
+    """
+    if "[TOOL_CALLS" not in content:
+        return None
+    start = content.find("[TOOL_CALLS") + len("[TOOL_CALLS")
+    args_idx = content.find("[ARGS", start)
+    if args_idx == -1:
+        return None
+    tool_name = content[start:args_idx].strip()
+    if not tool_name:
+        return None
+    json_start = content.find("{", args_idx)
+    if json_start == -1:
+        return tool_name, {}
+    depth = 0
+    end = None
+    for i in range(json_start, len(content)):
+        ch = content[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        return tool_name, {}
+    json_str = content[json_start:end]
+    try:
+        args = json.loads(json_str)
+    except Exception:
+        args = {}
+    return tool_name, args
 
 
 def get_cost(messages: list[Message]) -> tuple[float, float] | None:
