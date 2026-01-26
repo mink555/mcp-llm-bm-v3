@@ -17,6 +17,31 @@ export LITELLM_LOG
 export PYTHONWARNINGS
 export LITELLM_DISABLE_TELEMETRY="${LITELLM_DISABLE_TELEMETRY:-1}"
 
+# tau2 실행기 선택:
+# - PATH에 tau2가 있으면 그대로 사용
+# - 없으면 (python3.13 -> python3 -> python) 중 tau2 import 가능한 인터프리터로 `python -m tau2.cli` 사용
+TAU2=()
+if command -v tau2 >/dev/null 2>&1; then
+  TAU2=(tau2)
+else
+  for PY in python3.13 python3 python; do
+    if command -v "$PY" >/dev/null 2>&1; then
+      if "$PY" - <<'PY' >/dev/null 2>&1; then
+import tau2  # noqa: F401
+PY
+        TAU2=("$PY" -m tau2.cli)
+        break
+      fi
+    fi
+  done
+fi
+if [ "${#TAU2[@]}" -eq 0 ]; then
+  echo "[ERROR] tau2 실행기를 찾지 못했습니다."
+  echo "  - 해결1) pyenv를 쓰는 경우: tau2가 설치된 버전으로 전환 (예: pyenv shell 3.13.6/envs/mcp-llm-bm-v3)"
+  echo "  - 해결2) tau2-bench 설치: cd tau2-bench && python -m pip install -e ."
+  exit 1
+fi
+
 # .env 로드(옵션)
 if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   for ENV_FILE in ".env" "../.env" ".env.local" "../.env.local"; do
@@ -158,7 +183,7 @@ run_one() {
   # 1) 먼저 "일괄 실행"으로 최대한 채워보기(파일이 없을 때만)
   if [ ! -f "$out_json" ]; then
     echo "  - domain=${domain} task_set=${task_set} model=${model##*/} tasks=${NUM_TASKS} trials=${NUM_TRIALS}"
-    if ! tau2 run \
+    if ! "${TAU2[@]}" run \
       --domain "$domain" \
       --task-set-name "$task_set" \
       --task-ids "${task_ids[@]}" \
@@ -224,7 +249,7 @@ PY
         local tmp_save="${save_to}__fill_${tid_s}__a${attempt}"
         local tmp_json="data/simulations/${tmp_save}.json"
         echo "    - [TRY] (${attempt}/${RETRIES_PER_TASK}) task_id=${tid}"
-        if tau2 run \
+        if "${TAU2[@]}" run \
           --domain "$domain" \
           --task-set-name "$task_set" \
           --task-ids "$tid" \
