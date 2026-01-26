@@ -527,16 +527,16 @@ def create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles):
         ws.cell(row=row_num, column=5).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num})'
         ws.cell(row=row_num, column=6).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num},런!$I:$I,\"PASS\")'
         
-        # Pass@1 formula: COMBIN(E, 1) / COMBIN(D, 1) = E / D
-        ws.cell(row=row_num, column=7).value = f"=IFERROR(F{row_num}/E{row_num}, 0)"
+        # Pass@1: n>=1일 때만 의미. n=0이면 빈칸(집계에서 제외)
+        ws.cell(row=row_num, column=7).value = f"=IF(E{row_num}<1,\"\",IFERROR(F{row_num}/E{row_num},\"\"))"
         ws.cell(row=row_num, column=7).number_format = '0.0%'
         
-        # Pass@2 formula: COMBIN(E, 2) / COMBIN(D, 2)
-        ws.cell(row=row_num, column=8).value = f"=IFERROR(COMBIN(F{row_num},2)/COMBIN(E{row_num},2), 0)"
+        # Pass@2: n<2면 '표본부족'으로 계산 불가 → 빈칸(0으로 오해 방지)
+        ws.cell(row=row_num, column=8).value = f"=IF(E{row_num}<2,\"\",IFERROR(COMBIN(F{row_num},2)/COMBIN(E{row_num},2),\"\"))"
         ws.cell(row=row_num, column=8).number_format = '0.0%'
         
-        # Pass@4 formula: COMBIN(E, 4) / COMBIN(D, 4)
-        ws.cell(row=row_num, column=9).value = f"=IFERROR(COMBIN(F{row_num},4)/COMBIN(E{row_num},4), 0)"
+        # Pass@4: n<4면 '표본부족'으로 계산 불가 → 빈칸(0으로 오해 방지)
+        ws.cell(row=row_num, column=9).value = f"=IF(E{row_num}<4,\"\",IFERROR(COMBIN(F{row_num},4)/COMBIN(E{row_num},4),\"\"))"
         ws.cell(row=row_num, column=9).number_format = '0.0%'
         
         # Apply styles
@@ -682,6 +682,25 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.cell(row=flow_desc_row, column=1).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
     ws.row_dimensions[flow_desc_row].height = 84
 
+    # ===== 비용 절감 관점: P@1(=Pass^1)만으로 quick 스크리닝하기 =====
+    ws.append([""])
+    ws.append(["비용 절감 Quick 기준(권장): P@1만으로 1차 스크리닝 → 상위 모델만 n≥2/4로 재검증"])
+    qs_row = ws.max_row
+    ws.merge_cells(f"A{qs_row}:O{qs_row}")
+    ws.cell(row=qs_row, column=1).font = styles["section"]["font"]
+
+    txt = (
+        "현재 리포트처럼 num_trials=1이면 Task당 n=1이라 P@2/P@4는 정의상 계산 불가(n<k)입니다.\n"
+        "- 비용 절감 목적의 1차 비교는 P@1(=성공률)에 집중해도 됩니다(큰 격차/회귀 탐지에 유용).\n"
+        "- 단, 툴콜/멀티턴 태스크는 분산이 크므로 P@1만으로 '안정성' 결론을 내리면 위험합니다.\n"
+        "- 실무 추천: 상위 1~2개 모델만 num_trials=2 또는 4로 추가 실행해 P@2/P@4로 재현성(안정성)을 확인하세요."
+    )
+    ws.append([txt])
+    r = ws.max_row
+    ws.merge_cells(f"A{r}:O{r}")
+    ws.cell(row=r, column=1).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws.row_dimensions[r].height = 90
+
     # ===== 케이스 1개로 보는 스코어가 찍히는 방식(직관) =====
     ws.append([""])
     ws.append(["케이스 예시(런 시트 첫 행 기준) — 멀티턴 왕복 → 체크 → Reward/PASS"])
@@ -750,15 +769,15 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         ws.append([None, model_name, None, None, None, None])
         
         # Pass@1: Average of Pass@1 for this model from Task별_집계
-        ws.cell(row=row_num, column=3).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!G:G),0)'
+        ws.cell(row=row_num, column=3).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!G:G),"")'
         ws.cell(row=row_num, column=3).number_format = '0.00%'
         
         # Pass@2: Average of Pass@2 for this model
-        ws.cell(row=row_num, column=4).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!H:H),0)'
+        ws.cell(row=row_num, column=4).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!H:H),"")'
         ws.cell(row=row_num, column=4).number_format = '0.00%'
         
         # Pass@4: Average of Pass@4 for this model
-        ws.cell(row=row_num, column=5).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!I:I),0)'
+        ws.cell(row=row_num, column=5).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!I:I),"")'
         ws.cell(row=row_num, column=5).number_format = '0.00%'
         # RankKey: Pass@1 > Pass@2 > Pass@4 우선, 동점은 행번호로 안정화
         ws.cell(row=row_num, column=6).value = f"=C{row_num}*1000000 + D{row_num}*1000 + E{row_num} + ROW()/1000000000"
@@ -889,11 +908,11 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         ws.cell(r, 1).alignment = styles["data"]["align"]
         col = 2
         for _k, model_name in models_mapping.items():
-            ws.cell(r, col).value = f'=IFERROR(AVERAGEIFS(Task별_집계!G:G, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
+            ws.cell(r, col).value = f'=IFERROR(AVERAGEIFS(Task별_집계!G:G, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),"")'
             ws.cell(r, col).number_format = "0.00%"
-            ws.cell(r, col+1).value = f'=IFERROR(AVERAGEIFS(Task별_집계!H:H, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
+            ws.cell(r, col+1).value = f'=IFERROR(AVERAGEIFS(Task별_집계!H:H, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),"")'
             ws.cell(r, col+1).number_format = "0.00%"
-            ws.cell(r, col+2).value = f'=IFERROR(AVERAGEIFS(Task별_집계!I:I, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),0)'
+            ws.cell(r, col+2).value = f'=IFERROR(AVERAGEIFS(Task별_집계!I:I, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),"")'
             ws.cell(r, col+2).number_format = "0.00%"
             for cc in [col, col+1, col+2]:
                 c = ws.cell(r, cc)
@@ -910,11 +929,11 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     data_end = overall_r - 1
     col = 2
     for _ in models_mapping.values():
-        ws.cell(overall_r, col).value = f"=AVERAGE({get_column_letter(col)}{data_start}:{get_column_letter(col)}{data_end})"
+        ws.cell(overall_r, col).value = f"=IFERROR(AVERAGE({get_column_letter(col)}{data_start}:{get_column_letter(col)}{data_end}),\"\")"
         ws.cell(overall_r, col).number_format = "0.00%"
-        ws.cell(overall_r, col+1).value = f"=AVERAGE({get_column_letter(col+1)}{data_start}:{get_column_letter(col+1)}{data_end})"
+        ws.cell(overall_r, col+1).value = f"=IFERROR(AVERAGE({get_column_letter(col+1)}{data_start}:{get_column_letter(col+1)}{data_end}),\"\")"
         ws.cell(overall_r, col+1).number_format = "0.00%"
-        ws.cell(overall_r, col+2).value = f"=AVERAGE({get_column_letter(col+2)}{data_start}:{get_column_letter(col+2)}{data_end})"
+        ws.cell(overall_r, col+2).value = f"=IFERROR(AVERAGE({get_column_letter(col+2)}{data_start}:{get_column_letter(col+2)}{data_end}),\"\")"
         ws.cell(overall_r, col+2).number_format = "0.00%"
         for cc in [col, col+1, col+2]:
             c = ws.cell(overall_r, cc)

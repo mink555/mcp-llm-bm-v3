@@ -5,6 +5,13 @@
 
 set -e
 
+# 로그 노이즈/경고 최소화(평가 결과에는 영향 없음)
+: "${LITELLM_LOG:=ERROR}"
+export LITELLM_LOG
+: "${PYTHONWARNINGS:=ignore:resource_tracker}"
+export PYTHONWARNINGS
+export LITELLM_DISABLE_TELEMETRY="${LITELLM_DISABLE_TELEMETRY:-1}"
+
 # .env 로드(옵션)
 if [ -z "${OPENROUTER_API_KEY:-}" ]; then
   for ENV_FILE in ".env" "../.env" ".env.local" "../.env.local"; do

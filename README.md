@@ -155,6 +155,15 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
   - 산식(코드): \( \mathrm{Pass}^k = \binom{c}{k} / \binom{n}{k} \)  (n=총 시행 수, c=성공 횟수)
   - 집계: Task별 Pass^k를 평균내어 도메인 점수로 보고, 도메인 점수들을 평균(매크로 평균)해 전체 요약을 만듭니다.
 
+### 비용 절감 관점: 450회(=Task당 1회)만 돌려서 P@1만 봐도 되나?
+
+결론부터 말하면, **“1차 스크리닝(대략 순위/회귀 탐지)” 목적이라면 P@1만으로도 충분한 경우가 많습니다.**  
+다만 **안정성(재현성)**까지 결론 내리려면 P@2/P@4처럼 \(k \ge 2\) 지표가 필요하고, 그러려면 **num_trials ≥ k**가 필요합니다.
+
+- **P@1만으로 충분한 경우**: 모델 간 격차가 크거나, “툴콜이 아예 안 나온다/스키마가 깨진다” 같은 큰 이슈를 빠르게 잡고 싶을 때
+- **P@1만으로 부족한 경우**: 툴콜/멀티턴 태스크처럼 분산이 큰 환경에서 “일관되게 잘한다”를 확인해야 할 때
+- **리포트에서 P@2/P@4가 빈칸이면**: 그 모델/도메인에서 **표본이 부족(n<k)해 정의상 계산 불가**라는 뜻입니다(0점이 아님).
+
 ## 지표별로 “어떤 실력”을 보는가 (해석 가이드)
 
 | 지표 | 정의(무엇을 측정) | 주로 보는 모델 실력 | 높으면 좋은데, 주의할 점 |
@@ -250,6 +259,7 @@ export OPENROUTER_API_KEY="YOUR_KEY"
 | **초고속 1개 테스트(telecom)** | `cd tau2-bench`<br>`export OPENROUTER_API_KEY="YOUR_KEY"`<br>`tau2 run --domain telecom --agent-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --user-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --num-trials 1 --num-tasks 1 --max-concurrency 1 --log-level ERROR` | 1개 태스크에서 **툴 호출이 실제로 나오는지**, 통신이 되는지 |
 | **엑셀 리포트 생성** | `cd tau2-bench`<br>`python3 generate_excel_report.py` | 요청/GT/모델 응답/FAIL 원인을 리포트로 확인 |
 | **5개 모델 × 3도메인 전체 평가** | `cd tau2-bench`<br>`./run_evaluation.sh` | 전체 Pass^k/도메인 성능 비교 |
+| **450회 Quick(3도메인×30태스크×5모델×1trial) + 최신 리포트 생성** | `cd tau2-bench`<br>`./run_quick_450.sh` | 비용 절감용 1차 스크리닝(P@1 중심) |
 | **OpenRouter 기본 라우팅 사용** | `cd tau2-bench`<br>`./run_evaluation.sh` | OpenRouter 기본 라우팅으로 실행 |
 
 ### 짧은 해석 포인트
@@ -319,6 +329,7 @@ DELAY_SEC=1 ./run_evaluation.sh
 - **HTTP 422 (요청 포맷 거부)**: 특정 provider 조합에서 tool calling 스키마 검증이 엄격해 요청이 차단될 수 있습니다.
   - 대응: LiteLLM/tau2 최신화, provider/route 변경(가능한 경우), 재시도
 - **LiteLLM cost mapping 경고**: 일부 모델은 비용 테이블에 매핑이 없어서 cost 계산이 0이거나 경고가 날 수 있습니다. 평가 자체(성공/실패, Pass^k)와는 별개지만 로그 노이즈가 될 수 있습니다.
+  - 최신 코드에서는 이 경고를 **모델당 1회만** 표시하고 cost는 0으로 처리합니다(“0=무료”가 아니라 “매핑 없음”일 수 있음).
 
 ## 참고
 

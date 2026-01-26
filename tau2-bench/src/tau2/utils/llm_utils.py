@@ -34,6 +34,8 @@ from tau2.environment.tool import Tool
 
 # litellm._turn_on_debug()
 
+_COST_WARNED_MODELS: set[str] = set()
+
 if USE_LANGFUSE:
     # set callbacks
     litellm.success_callback = ["langfuse"]
@@ -94,10 +96,19 @@ def get_response_cost(response: ModelResponse) -> float:
     response.model = _parse_ft_model_name(
         response.model
     )  # FIXME: Check Litellm, passing the model to completion_cost doesn't work.
+    # LiteLLM의 가격 매핑이 없는 모델(특히 openrouter/*)은 completion_cost에서 예외가 날 수 있음.
+    # 평가(성공/실패/Pass^k)에는 영향이 없으니, 로그 노이즈를 줄이기 위해 모델별 1회만 경고하고 0으로 처리.
+    global _COST_WARNED_MODELS
     try:
         cost = completion_cost(completion_response=response)
     except Exception as e:
-        logger.error(e)
+        model_name = getattr(response, "model", None) or str(response.get("model", ""))
+        if model_name not in _COST_WARNED_MODELS:
+            _COST_WARNED_MODELS.add(model_name)
+            logger.warning(
+                f"[cost] LiteLLM 가격 매핑을 찾지 못해 cost=0으로 처리합니다. model={model_name!r}. "
+                f"(평가 결과에는 영향 없음) err={type(e).__name__}: {e}"
+            )
         return 0.0
     return cost
 

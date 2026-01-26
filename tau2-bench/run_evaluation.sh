@@ -4,6 +4,13 @@
 
 set -e
 
+# 로그 노이즈/경고 최소화(평가 결과에는 영향 없음)
+: "${LITELLM_LOG:=ERROR}"
+export LITELLM_LOG
+: "${PYTHONWARNINGS:=ignore:resource_tracker}"
+export PYTHONWARNINGS
+export LITELLM_DISABLE_TELEMETRY="${LITELLM_DISABLE_TELEMETRY:-1}"
+
 # 재개(resume) 옵션
 # - RESUME=1(기본): 결과 파일이 있으면 완료 여부를 판단해서 완료면 스킵, 미완료면 이어서 실행(자동 y 입력)
 # - RESUME=0: 결과 파일이 있으면 에러(덮어쓰기/재개를 명시적으로 선택하게)
