@@ -1235,18 +1235,18 @@ def create_turns_sheet(wb, turns_rows, styles):
     """턴 단위(대화 흐름을 직관적으로 보는 시트)."""
     ws = wb.create_sheet("대화", 2)
     ws.append(["대화 흐름(원문) + 툴콜/툴결과를 한눈에"])
-    ws.merge_cells("A1:M1")
+    ws.merge_cells("A1:N1")
     ws["A1"].font = styles["title"]["font"]
     ws["A1"].alignment = styles["title"]["align"]
     ws.row_dimensions[1].height = 22
 
     ws.append(["이 시트 의미: 한 줄 = 대화 이벤트 1개(사용자/모델 발화 또는 TOOL_CALL/TOOL_RESULT). RunID/TurnIdx로 정렬하면 '한 케이스의 흐름'이 그대로 보입니다."])
-    ws.merge_cells("A2:M2")
+    ws.merge_cells("A2:N2")
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 28
 
     ws.append(["색상: TOOL_CALL=연노랑 / TOOL_RESULT=연회색. 사용법: (1) RunID 필터 → (2) TurnIdx 오름차순 → (3) Kind=TOOL_* 행에서 ToolName/Args/Result 확인"])
-    ws.merge_cells("A3:M3")
+    ws.merge_cells("A3:N3")
     ws["A3"].alignment = styles["data"]["align"]
     ws.row_dimensions[3].height = 28
 
@@ -1256,6 +1256,7 @@ def create_turns_sheet(wb, turns_rows, styles):
         "도메인",
         "TaskID",
         "Trial",
+        "PASS?",
         "TurnIdx",
         "Role",
         "Kind",
@@ -1278,7 +1279,8 @@ def create_turns_sheet(wb, turns_rows, styles):
         for c in range(1, len(headers) + 1):
             cell = ws.cell(r, c)
             cell.border = styles["data"]["border"]
-            if c in [5, 6, 7, 8]:
+            # Trial/PASS?/TurnIdx/Role/Kind는 가운데 정렬
+            if c in [5, 6, 7, 8, 9]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
@@ -1287,11 +1289,12 @@ def create_turns_sheet(wb, turns_rows, styles):
     # ===== TOOL_CALL / TOOL_RESULT 행 강조(조건부 서식) =====
     first_data_row = header_row + 1
     last_data_row = ws.max_row
-    vis_range = f"A{first_data_row}:L{last_data_row}"
+    # ToolCalls(JSON 원문) 컬럼은 숨김이므로, 보이는 범위까지만
+    vis_range = f"A{first_data_row}:M{last_data_row}"
     ws.conditional_formatting.add(
         vis_range,
         FormulaRule(
-            formula=[f'$H{first_data_row}="TOOL_CALL"'],
+            formula=[f'$I{first_data_row}="TOOL_CALL"'],
             fill=styles["tool_call_row"]["fill"],
             stopIfTrue=False,
         ),
@@ -1299,8 +1302,29 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws.conditional_formatting.add(
         vis_range,
         FormulaRule(
-            formula=[f'$H{first_data_row}="TOOL_RESULT"'],
+            formula=[f'$I{first_data_row}="TOOL_RESULT"'],
             fill=styles["tool_result_row"]["fill"],
+            stopIfTrue=False,
+        ),
+    )
+
+    # ===== PASS/FAIL 표시(전용 컬럼만 은은하게) =====
+    pass_col_range = f"F{first_data_row}:F{last_data_row}"
+    ws.conditional_formatting.add(
+        pass_col_range,
+        FormulaRule(
+            formula=[f'$F{first_data_row}="PASS"'],
+            fill=styles["pass"]["fill"],
+            font=styles["pass"]["font"],
+            stopIfTrue=False,
+        ),
+    )
+    ws.conditional_formatting.add(
+        pass_col_range,
+        FormulaRule(
+            formula=[f'$F{first_data_row}="FAIL"'],
+            fill=styles["fail"]["fill"],
+            font=styles["fail"]["font"],
             stopIfTrue=False,
         ),
     )
@@ -1313,16 +1337,17 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws.column_dimensions["C"].width = 10
     ws.column_dimensions["D"].width = 10
     ws.column_dimensions["E"].width = 6
-    ws.column_dimensions["F"].width = 7
-    ws.column_dimensions["G"].width = 10
-    ws.column_dimensions["H"].width = 12
-    ws.column_dimensions["I"].width = 24
-    ws.column_dimensions["J"].width = 44
-    ws.column_dimensions["K"].width = 54
-    ws.column_dimensions["L"].width = 54
-    ws.column_dimensions["M"].width = 50
+    ws.column_dimensions["F"].width = 7   # PASS?
+    ws.column_dimensions["G"].width = 7   # TurnIdx
+    ws.column_dimensions["H"].width = 10  # Role
+    ws.column_dimensions["I"].width = 12  # Kind
+    ws.column_dimensions["J"].width = 24  # ToolName
+    ws.column_dimensions["K"].width = 44  # ToolArgs
+    ws.column_dimensions["L"].width = 54  # Text
+    ws.column_dimensions["M"].width = 54  # ToolResult
+    ws.column_dimensions["N"].width = 50  # ToolCalls(JSON)
     # ToolCalls(JSON)은 필요할 때만 펼치기
-    ws.column_dimensions["M"].hidden = True
+    ws.column_dimensions["N"].hidden = True
     return ws
     
     # Title
@@ -1977,6 +2002,7 @@ def generate_report(
                         domain,
                         task_id,
                         int(trial),
+                        "PASS" if is_pass == 1 else "FAIL",
                         idx,
                         role,
                         kind,
