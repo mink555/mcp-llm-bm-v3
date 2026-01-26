@@ -77,6 +77,7 @@ MAX_STEPS="${MAX_STEPS:-200}"
 MAX_ERRORS="${MAX_ERRORS:-10}"
 MAX_ERRORS_SINGLE="${MAX_ERRORS_SINGLE:-3}"
 RETRIES_PER_TASK="${RETRIES_PER_TASK:-4}"
+FILL_PASSES="${FILL_PASSES:-20}"
 SINGLE_MAX_CONCURRENCY="${SINGLE_MAX_CONCURRENCY:-1}"
 DELAY_SEC="${DELAY_SEC:-1}"
 # FORCE=1이면 기존 결과를 삭제하고 처음부터 다시 실행
@@ -235,54 +236,117 @@ PY
 )"
   rm -f "$exp_file" 2>/dev/null || true
   if [ -n "$missing" ]; then
-    local missing_count
-    missing_count="$(echo "$missing" | wc -l | tr -d ' ')"
-    echo "  [FILL] missing tasks=${missing_count} -> 개별 실행/병합로 채움"
-    while IFS= read -r tid; do
-      [ -z "$tid" ] && continue
-      local ok=0
-      local attempt=1
-      while [ "$attempt" -le "$RETRIES_PER_TASK" ]; do
-        # task_id가 길 수 있어 파일명은 해시 대신 안전한 단축
-        local tid_s
-        tid_s="$(echo "$tid" | sed 's/[^A-Za-z0-9]/_/g' | cut -c1-80)"
-        local tmp_save="${save_to}__fill_${tid_s}__a${attempt}"
-        local tmp_json="data/simulations/${tmp_save}.json"
-        echo "    - [TRY] (${attempt}/${RETRIES_PER_TASK}) task_id=${tid}"
-        if "${TAU2[@]}" run \
-          --domain "$domain" \
-          --task-set-name "$task_set" \
-          --task-ids "$tid" \
-          --num-tasks 1 \
-          --num-trials "$NUM_TRIALS" \
-          --max-steps "$MAX_STEPS" \
-          --max-errors "$MAX_ERRORS_SINGLE" \
-          --max-concurrency "$SINGLE_MAX_CONCURRENCY" \
-          --agent-llm "$model" \
-          --agent-llm-args "$agent_args" \
-          --user-llm "$model" \
-          --user-llm-args "$user_args" \
-          --save-to "$tmp_save" \
-          --log-level ERROR; then
-          :
-        fi
-        # tmp_json이 생성되고 simulations가 1개 이상이면 병합
-        if [ -f "$tmp_json" ]; then
-          python3 merge_simulations.py --base "$out_json" --add "$tmp_json" --out "$out_json" || true
+    local pass=1
+    while [ "$pass" -le "$FILL_PASSES" ]; do
+      local missing_count
+      missing_count="$(echo "$missing" | wc -l | tr -d ' ')"
+      echo "  [FILL] pass=${pass}/${FILL_PASSES} missing tasks=${missing_count} -> 개별 실행/병합"
+
+      while IFS= read -r tid; do
+        [ -z "$tid" ] && continue
+        local ok=0
+        local attempt=1
+        while [ "$attempt" -le "$RETRIES_PER_TASK" ]; do
+          # task_id가 길 수 있어 파일명은 해시 대신 안전한 단축
+          local tid_s
+          tid_s="$(echo "$tid" | sed 's/[^A-Za-z0-9]/_/g' | cut -c1-80)"
+          local tmp_save="${save_to}__fill_${tid_s}__p${pass}a${attempt}"
+          local tmp_json="data/simulations/${tmp_save}.json"
+
+          echo "    - [TRY] (pass ${pass}/${FILL_PASSES}, ${attempt}/${RETRIES_PER_TASK}) task_id=${tid}"
+          if "${TAU2[@]}" run \
+            --domain "$domain" \
+            --task-set-name "$task_set" \
+            --task-ids "$tid" \
+            --num-tasks 1 \
+            --num-trials "$NUM_TRIALS" \
+            --max-steps "$MAX_STEPS" \
+            --max-errors "$MAX_ERRORS_SINGLE" \
+            --max-concurrency "$SINGLE_MAX_CONCURRENCY" \
+            --agent-llm "$model" \
+            --agent-llm-args "$agent_args" \
+            --user-llm "$model" \
+            --user-llm-args "$user_args" \
+            --save-to "$tmp_save" \
+            --log-level ERROR; then
+            :
+          fi
+
+          # tmp_json이 생성됐더라도 simulations가 실제로 1개 이상 있어야 병합(빈 결과/깨진 파일 방지)
+          local has_sim
+          has_sim="$(python3 - <<PY
+import json, sys
+from pathlib import Path
+p=Path("$tmp_json")
+if not p.exists():
+    print("0"); sys.exit(0)
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+    sims=d.get("simulations") or []
+    print("1" if len(sims)>0 else "0")
+except Exception:
+    print("0")
+PY
+)"
+          if [ "$has_sim" = "1" ]; then
+            python3 merge_simulations.py --base "$out_json" --add "$tmp_json" --out "$out_json" || true
+            rm -f "$tmp_json" 2>/dev/null || true
+            cp -f "$out_json" "results/latest/simulations/" 2>/dev/null || true
+            ok=1
+            break
+          fi
+
           rm -f "$tmp_json" 2>/dev/null || true
-          cp -f "$out_json" "results/latest/simulations/" 2>/dev/null || true
-          ok=1
-          break
+          attempt=$((attempt+1))
+          if [ "$DELAY_SEC" != "0" ]; then
+            sleep "$DELAY_SEC"
+          fi
+        done
+        if [ "$ok" -ne 1 ]; then
+          echo "    [WARN] task_id=${tid} (pass=${pass}) 를 ${RETRIES_PER_TASK}회 시도했지만 실패(다음 pass에서 재시도)"
         fi
-        attempt=$((attempt+1))
-        if [ "$DELAY_SEC" != "0" ]; then
-          sleep "$DELAY_SEC"
-        fi
-      done
-      if [ "$ok" -ne 1 ]; then
-        echo "    [WARN] task_id=${tid} 를 ${RETRIES_PER_TASK}회 시도했지만 실패(나중에 다시 시도 가능)"
+      done <<< "$missing"
+
+      # recompute missing after this pass (exp_file 방식)
+      local exp_file2
+      exp_file2="$(mktemp)"
+      printf "%s\n" "${task_ids[@]}" > "$exp_file2"
+      missing="$(python3 - <<PY
+import json
+from pathlib import Path
+out_json=Path("$out_json")
+exp=Path("$exp_file2").read_text(encoding="utf-8").splitlines()
+exp=[x.strip() for x in exp if x.strip()]
+done=set()
+if out_json.exists():
+    try:
+        data=json.loads(out_json.read_text(encoding="utf-8"))
+        for s in (data.get("simulations") or []):
+            if isinstance(s, dict) and s.get("task_id"):
+                done.add(str(s["task_id"]))
+    except Exception:
+        pass
+missing=[x for x in exp if x not in done]
+print("\\n".join(missing))
+PY
+)"
+      rm -f "$exp_file2" 2>/dev/null || true
+
+      if [ -z "$missing" ]; then
+        echo "  [FILL] completed: $(basename "$out_json")"
+        break
       fi
-    done <<< "$missing"
+      pass=$((pass+1))
+      if [ "$DELAY_SEC" != "0" ]; then
+        sleep "$DELAY_SEC"
+      fi
+    done
+
+    if [ -n "$missing" ]; then
+      echo "  [ERROR] still missing after ${FILL_PASSES} passes: $(basename "$out_json")"
+      echo "$missing" | sed 's/^/    - /'
+      return 1
+    fi
   fi
 
   if [ "$DELAY_SEC" != "0" ]; then
