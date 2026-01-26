@@ -227,6 +227,8 @@ def setup_styles():
     fail_fill = "FCE4D6"   # 연한 빨강/주황
     pass_row_fill = "F3FAF1"  # 아주 연한 초록(행 강조)
     fail_row_fill = "FFF4F0"  # 아주 연한 주황(행 강조)
+    tool_call_row_fill = "FFF8E1"  # TOOL_CALL(아주 연한 노랑)
+    tool_result_row_fill = "F3F3F3"  # TOOL_RESULT(아주 연한 회색)
     top1_fill = "FFF2CC"   # 1위(은은한 골드)
     top2_fill = "DDEBF7"   # 2위(은은한 블루)
     top3_fill = "E7E6E6"   # 3위(은은한 그레이)
@@ -294,6 +296,12 @@ def setup_styles():
         },
         'fail_row': {
             'fill': PatternFill(start_color=fail_row_fill, end_color=fail_row_fill, fill_type="solid"),
+        },
+        'tool_call_row': {
+            'fill': PatternFill(start_color=tool_call_row_fill, end_color=tool_call_row_fill, fill_type="solid"),
+        },
+        'tool_result_row': {
+            'fill': PatternFill(start_color=tool_result_row_fill, end_color=tool_result_row_fill, fill_type="solid"),
         },
         'fail_strong_font': {
             'font': Font(bold=True, size=9, name="Malgun Gothic", color="9C0006"),
@@ -993,6 +1001,23 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
             c.alignment = styles["data_center"]["align"]
         col += 3
 
+    # ===== 매트릭스 강조(과하지 않게): 각 도메인 행에서 P@1 최고값만 은은하게 표시 =====
+    # P@1 컬럼들: 2,5,8,... (모델당 3칸 중 첫번째)
+    p1_cols = [2 + 3 * i for i in range(len(models_mapping))]
+    for rr in range(data_start, overall_r + 1):
+        # 데이터가 없으면(빈칸만) 하이라이트하지 않음
+        p1_cells = ",".join([f"{get_column_letter(c)}{rr}" for c in p1_cols])
+        for c in p1_cols:
+            cell_addr = f"{get_column_letter(c)}{rr}"
+            ws.conditional_formatting.add(
+                cell_addr,
+                FormulaRule(
+                    formula=[f"=AND({cell_addr}<>\"\",{cell_addr}=MAX({p1_cells}))"],
+                    fill=styles["top1"]["fill"],
+                    stopIfTrue=False,
+                ),
+            )
+
     # Freeze header for the sheet top (ranking)
     ws.freeze_panes = f"A{header_row+1}"
 
@@ -1215,10 +1240,15 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws["A1"].alignment = styles["title"]["align"]
     ws.row_dimensions[1].height = 22
 
-    ws.append(["팁: RunID로 필터한 뒤 TurnIdx 오름차순으로 보면 한 케이스의 대화가 순서대로 보입니다. TOOL_CALL/TOOL_RESULT 행이 핵심입니다."])
+    ws.append(["이 시트 의미: 한 줄 = 대화 이벤트 1개(사용자/모델 발화 또는 TOOL_CALL/TOOL_RESULT). RunID/TurnIdx로 정렬하면 '한 케이스의 흐름'이 그대로 보입니다."])
     ws.merge_cells("A2:M2")
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 28
+
+    ws.append(["색상: TOOL_CALL=연노랑 / TOOL_RESULT=연회색. 사용법: (1) RunID 필터 → (2) TurnIdx 오름차순 → (3) Kind=TOOL_* 행에서 ToolName/Args/Result 확인"])
+    ws.merge_cells("A3:M3")
+    ws["A3"].alignment = styles["data"]["align"]
+    ws.row_dimensions[3].height = 28
 
     headers = [
         "RunID",
@@ -1246,23 +1276,34 @@ def create_turns_sheet(wb, turns_rows, styles):
         ws.append(row)
     for r in range(header_row + 1, ws.max_row + 1):
         for c in range(1, len(headers) + 1):
-            cell = ws.cell(r,c)
+            cell = ws.cell(r, c)
             cell.border = styles["data"]["border"]
-            if c in [5, 6]:
-                cell.alignment = styles["data_center"]["align"]
-            elif c in [7, 8]:
+            if c in [5, 6, 7, 8]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
-        ws.row_dimensions[r].height = 60
-        # kind별로 아주 옅게 배경(가독성)
-        kind = (ws.cell(r, 8).value or "")
-        if kind == "TOOL_CALL":
-            for cc in range(1, len(headers) + 1):
-                ws.cell(r, cc).fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # 연노랑
-        elif kind == "TOOL_RESULT":
-            for cc in range(1, len(headers) + 1):
-                ws.cell(r, cc).fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")  # 연회색
+        ws.row_dimensions[r].height = 54
+
+    # ===== TOOL_CALL / TOOL_RESULT 행 강조(조건부 서식) =====
+    first_data_row = header_row + 1
+    last_data_row = ws.max_row
+    vis_range = f"A{first_data_row}:L{last_data_row}"
+    ws.conditional_formatting.add(
+        vis_range,
+        FormulaRule(
+            formula=[f'$H{first_data_row}="TOOL_CALL"'],
+            fill=styles["tool_call_row"]["fill"],
+            stopIfTrue=False,
+        ),
+    )
+    ws.conditional_formatting.add(
+        vis_range,
+        FormulaRule(
+            formula=[f'$H{first_data_row}="TOOL_RESULT"'],
+            fill=styles["tool_result_row"]["fill"],
+            stopIfTrue=False,
+        ),
+    )
 
     ws.freeze_panes = f"A{header_row+1}"
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{ws.max_row}"
