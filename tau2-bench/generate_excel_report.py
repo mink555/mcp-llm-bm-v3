@@ -96,6 +96,17 @@ def _summarize_model(tool_names: str, agent_final: str) -> str:
         parts.append(f"- 최종응답: {final_short}")
     return "\n".join(parts)
 
+
+def _truncate_for_excel(text: Any, limit: int = 420) -> str:
+    """엑셀 가독성용 요약 문자열(원문은 숨김 컬럼에 그대로 보관)."""
+    if text is None:
+        return ""
+    s = str(text)
+    s = s.replace("\r\n", "\n")
+    if len(s) <= limit:
+        return s
+    return s[:limit] + " …(생략)"
+
 def _fmt_kv_call(name: str, args: dict | None) -> str:
     try:
         a = json.dumps(args or {}, ensure_ascii=False)
@@ -229,6 +240,7 @@ def setup_styles():
     fail_row_fill = "FFF4F0"  # 아주 연한 주황(행 강조)
     tool_call_row_fill = "FFF8E1"  # TOOL_CALL(아주 연한 노랑)
     tool_result_row_fill = "F3F3F3"  # TOOL_RESULT(아주 연한 회색)
+    na_font_color = "7F7F7F"  # N/A(표본부족) 표시용
     top1_fill = "FFF2CC"   # 1위(은은한 골드)
     top2_fill = "DDEBF7"   # 2위(은은한 블루)
     top3_fill = "E7E6E6"   # 3위(은은한 그레이)
@@ -302,6 +314,9 @@ def setup_styles():
         },
         'tool_result_row': {
             'fill': PatternFill(start_color=tool_result_row_fill, end_color=tool_result_row_fill, fill_type="solid"),
+        },
+        'na': {
+            'font': Font(italic=True, size=9, name="Malgun Gothic", color=na_font_color),
         },
         'fail_strong_font': {
             'font': Font(bold=True, size=9, name="Malgun Gothic", color="9C0006"),
@@ -519,20 +534,21 @@ def create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles):
     
     # Title
     ws.append(["Task별 성공률 집계 (Pass^k 계산용)"])
-    ws.merge_cells('A1:H1')
+    ws.merge_cells('A1:I1')
     ws['A1'].font = styles['title']['font']
     ws['A1'].alignment = styles['title']['align']
     ws.row_dimensions[1].height = 25
     
     ws.append([""])
     ws.append(["이 시트는 각 Task의 시행별 성공 횟수를 집계하여 Pass^k 메트릭을 계산합니다."])
-    ws.merge_cells('A3:H3')
+    ws.merge_cells('A3:I3')
     ws.append(["Pass^k = COMBIN(성공횟수, k) / COMBIN(총시행횟수, k)"])
-    ws.merge_cells('A4:H4')
+    ws.merge_cells('A4:I4')
     ws.append([""])
     
-    # Headers (총시행/성공횟수 모두 런_원본 기반 수식)
-    headers = ["모델", "도메인", "도메인 설명", "TaskID", "총시행", "성공횟수", "Pass@1", "Pass@2", "Pass@4"]
+    # Headers (총시행/성공횟수 모두 런 시트 기반 수식)
+    # NOTE: TaskID는 도메인/태스크셋마다 숫자/문자열 혼재 가능. TaskIdx(태스크셋 순번)로 정렬/비교를 통일한다.
+    headers = ["모델", "도메인", "도메인 설명", "TaskIdx", "총시행", "성공횟수", "Pass@1", "Pass@2", "Pass@4"]
     ws.append(headers)
     header_row = ws.max_row
     
@@ -542,26 +558,26 @@ def create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles):
         cell.alignment = styles['header']['align']
         cell.border = styles['header']['border']
     
-    # Group data by Model, Domain, TaskID (행 생성용 키만 파이썬으로 추출)
+    # Group data by Model, Domain, TaskIdx (행 생성용 키만 파이썬으로 추출)
     task_groups = {}
     for log in all_logs:
-        key = (log['Model'], log['Domain'], str(log['TaskID']))
+        key = (log['Model'], log['Domain'], int(log.get('TaskIdx') or 10**9))
         if key not in task_groups:
             task_groups[key] = []
         task_groups[key].append(log)
     
     # Add data rows
-    for (model, domain, task_id), logs in sorted(task_groups.items()):
+    for (model, domain, task_idx), logs in sorted(task_groups.items()):
         row_num = ws.max_row + 1
-        ws.append([model, domain, None, task_id, None, None, None, None, None])
+        ws.append([model, domain, None, task_idx if task_idx != 10**9 else "", None, None, None, None, None])
 
         # 도메인 설명(도메인_설명 시트 참조)
         ws.cell(row=row_num, column=3).value = f'=IFERROR(VLOOKUP(B{row_num},도메인_설명!$A:$C,3,FALSE),"")'
 
         # 총시행/성공횟수: 런 시트 기반 (외부/연결 오탐 방지)
-        # 런: B 모델, C 도메인, D TaskID, I PASS?
+        # 런: A=Result(PASS/FAIL), B=모델, C=도메인, D=TaskIdx
         ws.cell(row=row_num, column=5).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num})'
-        ws.cell(row=row_num, column=6).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num},런!$I:$I,\"PASS\")'
+        ws.cell(row=row_num, column=6).value = f'=COUNTIFS(런!$B:$B,$A{row_num},런!$C:$C,$B{row_num},런!$D:$D,$D{row_num},런!$A:$A,\"PASS\")'
         
         # Pass@1: n>=1일 때만 의미. n=0이면 빈칸(집계에서 제외)
         ws.cell(row=row_num, column=7).value = f"=IF(E{row_num}<1,\"\",IFERROR(F{row_num}/E{row_num},\"\"))"
@@ -594,16 +610,19 @@ def create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles):
     ws.column_dimensions['A'].width = 35
     ws.column_dimensions['B'].width = 12
     ws.column_dimensions['C'].width = 28
-    ws.column_dimensions['D'].width = 8
-    ws.column_dimensions['E'].width = 10
-    ws.column_dimensions['F'].width = 10
+    ws.column_dimensions['D'].width = 7   # TaskIdx
+    ws.column_dimensions['E'].width = 10  # 총시행
+    ws.column_dimensions['F'].width = 10  # 성공횟수
     for col in ['G', 'H', 'I']:
         ws.column_dimensions[col].width = 12
 
-def create_summary_sheet(wb, models_mapping, domains, styles):
+def create_summary_sheet(wb, models_mapping, domains, styles, *, max_trials_seen: int = 1, tool_args_err_col_letter: str = "T"):
     """요약 시트: Overall 랭킹 + 도메인별 Pass^k 매트릭스를 한 시트에 섹션으로 구성."""
     ws = wb.create_sheet("요약", 0)
     
+    show_p2 = (max_trials_seen or 1) >= 2
+    show_p4 = (max_trials_seen or 1) >= 4
+
     # Title
     ws.append(["TAU2-Bench 평가 요약"])
     ws.merge_cells('A1:O1')
@@ -620,7 +639,37 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws['A3'].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     ws.row_dimensions[3].height = 30
 
+    # ===== 한눈에 보기(3줄) =====
+    ws.append([""])
+    ws.append(["한눈에 보기(3줄)"])
+    summary_title_row = ws.max_row
+    ws.merge_cells(f"A{summary_title_row}:F{summary_title_row}")
+    ws.cell(row=summary_title_row, column=1).font = styles["section"]["font"]
+
+    ws.append(["항목", "값", "비고"])
+    summary_header_row = ws.max_row
+    for col_idx in range(1, 4):
+        cell = ws.cell(summary_header_row, col_idx)
+        cell.font = styles["header"]["font"]
+        cell.fill = styles["header"]["fill"]
+        cell.alignment = styles["header"]["align"]
+        cell.border = styles["header"]["border"]
+
+    # 값은 랭킹 표 범위가 만들어진 뒤에 수식으로 채움(아래에서 설정)
+    summary_row_top = ws.max_row + 1
+    ws.append(["Overall 1위(모델)", "", "P@1 기준"])
+    summary_row_top_p1 = ws.max_row + 1
+    ws.append(["Overall 1위 P@1", "", "num_trials=1이면 핵심 지표"])
+    ws.append(["주의", f"num_trials={max_trials_seen} → P@1 중심 (P@2/P@4는 필요 시 추가 실행)", "P@2/P@4는 재현성(안정성) 지표"])
+    for rr in range(summary_row_top, ws.max_row + 1):
+        for cc in range(1, 4):
+            cell = ws.cell(rr, cc)
+            cell.border = styles["data"]["border"]
+            cell.alignment = styles["data"]["align"] if cc != 2 else styles["data_center"]["align"]
+
     # ===== 실패사유/체크축 Glossary =====
+    # 기본 화면에서는 정신없으므로 '그룹으로 접어두기(숨김)' 처리한다.
+    glossary_start_row = ws.max_row + 1
     ws.append([""])
     ws.append(["실패사유(종료사유) / 평가체크(Reward 축) 빠른 해석 가이드"])
     gloss_title_row = ws.max_row
@@ -778,6 +827,14 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.column_dimensions["B"].width = 54
     ws.column_dimensions["C"].width = 54
     
+    # ===== Glossary/설명 섹션 접기(기본 숨김) =====
+    glossary_end_row = ws.max_row
+    try:
+        ws.row_dimensions.group(glossary_start_row, glossary_end_row, hidden=True)
+    except Exception:
+        for rr in range(glossary_start_row, glossary_end_row + 1):
+            ws.row_dimensions[rr].hidden = True
+
     ws.append([""])
     
     # Section title (glossary가 추가되었으므로 위치가 유동적)
@@ -787,8 +844,11 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.cell(row=rank_title_row, column=1).font = styles['section']['font']
     ws.row_dimensions[rank_title_row].height = 20
     
-    # Headers
-    headers = ["순위", "모델", "Pass@1", "Pass@2", "Pass@4", "RankKey(hidden)"]
+    # Headers (num_trials=1이면 P@1만 기본 표시)
+    if show_p2 or show_p4:
+        headers = ["순위", "모델", "Pass@1", "Pass@2", "Pass@4"]
+    else:
+        headers = ["순위", "모델", "Pass@1"]
     ws.append(headers)
     header_row = ws.max_row
     
@@ -797,32 +857,57 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         cell.fill = styles['header']['fill']
         cell.alignment = styles['header']['align']
         cell.border = styles['header']['border']
+
+    # RankKey는 '시트 전체 컬럼 숨김' 충돌을 피하려고 Z열(숨김)에 둔다.
+    rankkey_col_letter = "Z"
+    rk_head = ws[f"{rankkey_col_letter}{header_row}"]
+    rk_head.value = "RankKey(hidden)"
+    rk_head.font = styles["header"]["font"]
+    rk_head.fill = styles["header"]["fill"]
+    rk_head.alignment = styles["header"]["align"]
+    rk_head.border = styles["header"]["border"]
     
     # Data rows with formulas (정렬은 엑셀에서 수행. 순위는 RANK 계열 대신 COUNTIF로 호환성 확보)
     first_data_row = ws.max_row + 1
     for _, (model_key, model_name) in enumerate(models_mapping.items(), 1):
         row_num = ws.max_row + 1
-        ws.append([None, model_name, None, None, None, None])
+        if show_p2 or show_p4:
+            ws.append([None, model_name, None, None, None])
+        else:
+            ws.append([None, model_name, None])
         
         # Pass@1: Average of Pass@1 for this model from Task별_집계
-        ws.cell(row=row_num, column=3).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!G:G),"")'
+        ws.cell(row=row_num, column=3).value = (
+            f'=IF(COUNTIFS(Task별_집계!$A:$A,B{row_num},Task별_집계!$E:$E,">=1")=0,'
+            f'"N/A",IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!G:G),""))'
+        )
         ws.cell(row=row_num, column=3).number_format = '0.00%'
         
-        # Pass@2: Average of Pass@2 for this model
-        ws.cell(row=row_num, column=4).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!H:H),"")'
-        ws.cell(row=row_num, column=4).number_format = '0.00%'
-        
-        # Pass@4: Average of Pass@4 for this model
-        ws.cell(row=row_num, column=5).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!I:I),"")'
-        ws.cell(row=row_num, column=5).number_format = '0.00%'
-        # RankKey: Pass@1 > Pass@2 > Pass@4 우선, 동점은 행번호로 안정화
-        # NOTE: 빈칸/텍스트가 섞여도 랭킹이 깨지지 않도록 N()로 숫자 강제
-        ws.cell(row=row_num, column=6).value = (
-            f"=N(C{row_num})*1000000 + N(D{row_num})*1000 + N(E{row_num}) + ROW()/1000000000"
-        )
+        if show_p2 or show_p4:
+            # Pass@2: Average of Pass@2 for this model
+            ws.cell(row=row_num, column=4).value = (
+                f'=IF(COUNTIFS(Task별_집계!$A:$A,B{row_num},Task별_집계!$E:$E,">=2")=0,'
+                f'"N/A",IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!H:H),""))'
+            )
+            ws.cell(row=row_num, column=4).number_format = '0.00%'
+            # Pass@4: Average of Pass@4 for this model
+            ws.cell(row=row_num, column=5).value = (
+                f'=IF(COUNTIFS(Task별_집계!$A:$A,B{row_num},Task별_집계!$E:$E,">=4")=0,'
+                f'"N/A",IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!I:I),""))'
+            )
+            ws.cell(row=row_num, column=5).number_format = '0.00%'
+            # RankKey: Pass@1 > Pass@2 > Pass@4 우선, 동점은 행번호로 안정화
+            ws[f"{rankkey_col_letter}{row_num}"].value = (
+                f"=N(C{row_num})*1000000 + N(D{row_num})*1000 + N(E{row_num}) + ROW()/1000000000"
+            )
+        else:
+            # num_trials=1: RankKey는 Pass@1만으로 충분
+            ws[f"{rankkey_col_letter}{row_num}"].value = (
+                f"=N(C{row_num}) + ROW()/1000000000"
+            )
 
         # Apply styles (이 행 전체)
-        for col_idx in range(1, 6 + 1):
+        for col_idx in range(1, len(headers) + 1):
             cell = ws.cell(row=row_num, column=col_idx)
             cell.border = styles['data']['border']
             if col_idx == 1 or col_idx >= 3:
@@ -836,12 +921,13 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     #       SUMPRODUCT 비교식으로 안전하게 랭킹을 계산한다.
     for r in range(first_data_row, last_data_row + 1):
         ws.cell(row=r, column=1).value = (
-            f"=IF(F{r}=\"\",\"\",1+SUMPRODUCT(--($F${first_data_row}:$F${last_data_row}>F{r})))"
+            f"=IF({rankkey_col_letter}{r}=\"\",\"\",1+SUMPRODUCT(--(${rankkey_col_letter}${first_data_row}:${rankkey_col_letter}${last_data_row}>{rankkey_col_letter}{r})))"
         )
         ws.cell(row=r, column=1).alignment = styles["data_center"]["align"]
 
     # ===== 랭킹 강조(과하지 않게 1/2/3위만) =====
-    rank_range = f"A{first_data_row}:E{last_data_row}"
+    last_rank_vis_col = "C" if not (show_p2 or show_p4) else "E"
+    rank_range = f"A{first_data_row}:{last_rank_vis_col}{last_data_row}"
     ws.conditional_formatting.add(
         rank_range,
         FormulaRule(formula=[f"$A{first_data_row}=1"], fill=styles["top1"]["fill"], font=styles["top1"]["font"], stopIfTrue=True),
@@ -855,17 +941,37 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         FormulaRule(formula=[f"$A{first_data_row}=3"], fill=styles["top3"]["fill"], font=styles["top3"]["font"], stopIfTrue=True),
     )
 
-    # RankKey 컬럼 숨김
-    ws.column_dimensions["F"].hidden = True
+    # N/A(표본부족) 표시는 회색/이탤릭으로(숫자와 구분)
+    ws.conditional_formatting.add(
+        f"C{first_data_row}:{last_rank_vis_col}{last_data_row}",
+        FormulaRule(formula=[f'C{first_data_row}="N/A"'], font=styles["na"]["font"], stopIfTrue=False),
+    )
+
+    # RankKey 컬럼 숨김 (Z열)
+    ws.column_dimensions[rankkey_col_letter].hidden = True
     
     # Column widths
     ws.column_dimensions['A'].width = 8
     ws.column_dimensions['B'].width = 40
     ws.column_dimensions['C'].width = 14
-    ws.column_dimensions['D'].width = 14
-    ws.column_dimensions['E'].width = 14
+    if show_p2 or show_p4:
+        ws.column_dimensions['D'].width = 14
+        ws.column_dimensions['E'].width = 14
+
+    # ===== 한눈에 보기 수식 채우기(랭킹 표 범위 기반) =====
+    # Overall 1위(모델) / 1위 P@1
+    try:
+        ws.cell(summary_row_top, 2).value = (
+            f'=INDEX($B${first_data_row}:$B${last_data_row}, MATCH(MAX($C${first_data_row}:$C${last_data_row}), $C${first_data_row}:$C${last_data_row}, 0))'
+        )
+        ws.cell(summary_row_top_p1, 2).value = f'=MAX($C${first_data_row}:$C${last_data_row})'
+        ws.cell(summary_row_top_p1, 2).number_format = "0.00%"
+    except Exception:
+        pass
 
     # ===== Tool-call JSON args health section =====
+    # 디버깅 성격의 섹션은 기본 숨김(필요 시 펼치기)
+    schema_start_row = ws.max_row + 1
     ws.append([""])
     ws.append(["툴콜 arguments(JSON) 안정성(=Schema mismatch 후보)"])
     health_title_row = ws.max_row
@@ -884,7 +990,8 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     )
     ws.row_dimensions[health_desc_row].height = 36
 
-    ws.append(["모델", "런 수", "오류 런 수", "오류율", "런당 평균 오류수", "비고"])
+    # 너무 넓어지는 걸 막기 위해 핵심만 표시(상세는 런 시트 숨김 컬럼에서 확인)
+    ws.append(["모델", "런 수", "오류 런 수", "오류율"])
     health_header_row = ws.max_row
     for col_idx, cell in enumerate(ws[health_header_row], 1):
         cell.font = styles["header"]["font"]
@@ -894,22 +1001,28 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
 
     for model_name in models_mapping.values():
         r = ws.max_row + 1
-        ws.append([model_name, None, None, None, None, ""])
-        # 런 시트 기준: B=모델, T=ToolArgsJSONErrorCount(hidden)
+        ws.append([model_name, None, None, None])
+        # 런 시트 기준: B=모델, ToolArgsJSONErrorCount(숨김 컬럼, 위치는 동적으로 전달)
         ws.cell(r, 2).value = f'=COUNTIF(런!$B:$B, $A{r})'
-        ws.cell(r, 3).value = f'=COUNTIFS(런!$B:$B, $A{r}, 런!$T:$T, ">0")'
+        ws.cell(r, 3).value = f'=COUNTIFS(런!$B:$B, $A{r}, 런!${tool_args_err_col_letter}:${tool_args_err_col_letter}, ">0")'
         ws.cell(r, 4).value = f"=IFERROR(C{r}/B{r},0)"
         ws.cell(r, 4).number_format = "0.00%"
-        ws.cell(r, 5).value = f'=IFERROR(AVERAGEIFS(런!$T:$T, 런!$B:$B, $A{r}),0)'
-        ws.cell(r, 5).number_format = "0.00"
-        for cc in range(1, 6 + 1):
+        for cc in range(1, 4 + 1):
             cell = ws.cell(r, cc)
             cell.border = styles["data"]["border"]
             cell.alignment = (
                 styles["data_center"]["align"]
-                if cc in [2, 3, 4, 5]
+                if cc in [2, 3, 4]
                 else styles["data"]["align"]
             )
+
+    # schema 섹션 접기(기본 숨김)
+    schema_end_row = ws.max_row
+    try:
+        ws.row_dimensions.group(schema_start_row, schema_end_row, hidden=True)
+    except Exception:
+        for rr in range(schema_start_row, schema_end_row + 1):
+            ws.row_dimensions[rr].hidden = True
 
     # ===== Domain matrix section =====
     ws.append([""])
@@ -927,14 +1040,15 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     ws.merge_cells(f"A{desc_row}:O{desc_row}")
 
     ws.append([""])
+    ks = [1] + ([2] if show_p2 else []) + ([4] if show_p4 else [])
     header_row_1 = ["도메인"]
     for model_name in models_mapping.values():
-        header_row_1.extend([model_name, "", ""])
+        header_row_1.extend([model_name] + ([""] * (len(ks) - 1)))
     ws.append(header_row_1)
     h1 = ws.max_row
     header_row_2 = [""]
     for _ in models_mapping.values():
-        header_row_2.extend(["P@1", "P@2", "P@4"])
+        header_row_2.extend([f"P@{k}" for k in ks])
     ws.append(header_row_2)
     h2 = ws.max_row
 
@@ -952,10 +1066,12 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
                 cell.fill = styles["header2"]["fill"]
                 cell.font = styles["header2"]["font"]
 
-    col = 2
-    for _mn in models_mapping.values():
-        ws.merge_cells(start_row=h1, start_column=col, end_row=h1, end_column=col + 2)
-        col += 3
+    # 모델 헤더 merge는 k가 2개 이상일 때만
+    if len(ks) > 1:
+        col = 2
+        for _mn in models_mapping.values():
+            ws.merge_cells(start_row=h1, start_column=col, end_row=h1, end_column=col + (len(ks) - 1))
+            col += len(ks)
 
     domain_names = {"retail": "Retail", "airline": "Airline", "telecom": "Telecom"}
     data_start = ws.max_row + 1
@@ -966,17 +1082,20 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         ws.cell(r, 1).alignment = styles["data"]["align"]
         col = 2
         for _k, model_name in models_mapping.items():
-            ws.cell(r, col).value = f'=IFERROR(AVERAGEIFS(Task별_집계!G:G, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),"")'
-            ws.cell(r, col).number_format = "0.00%"
-            ws.cell(r, col+1).value = f'=IFERROR(AVERAGEIFS(Task별_집계!H:H, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),"")'
-            ws.cell(r, col+1).number_format = "0.00%"
-            ws.cell(r, col+2).value = f'=IFERROR(AVERAGEIFS(Task별_집계!I:I, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),"")'
-            ws.cell(r, col+2).number_format = "0.00%"
-            for cc in [col, col+1, col+2]:
-                c = ws.cell(r, cc)
+            # k별 컬럼 매핑 (Task별_집계: G/H/I)
+            # Task별_집계: G=Pass@1, H=Pass@2, I=Pass@4 (TaskID 제거됨)
+            k_to_col = {1: "G", 2: "H", 4: "I"}
+            for kk in ks:
+                letter = k_to_col[kk]
+                ws.cell(r, col).value = (
+                    f'=IF(COUNTIFS(Task별_집계!$A:$A,\"{models_mapping[_k]}\",Task별_집계!$B:$B,\"{d}\",Task별_집계!$E:$E,\">={kk}\")=0,'
+                    f'"N/A",IFERROR(AVERAGEIFS(Task별_집계!{letter}:{letter}, Task별_집계!A:A, \"{models_mapping[_k]}\", Task별_집계!B:B, \"{d}\"),""))'
+                )
+                ws.cell(r, col).number_format = "0.00%"
+                c = ws.cell(r, col)
                 c.border = styles["data"]["border"]
                 c.alignment = styles["data_center"]["align"]
-            col += 3
+                col += 1
 
     overall_r = ws.max_row + 1
     ws.cell(overall_r, 1).value = "Overall"
@@ -987,23 +1106,19 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
     data_end = overall_r - 1
     col = 2
     for _ in models_mapping.values():
-        ws.cell(overall_r, col).value = f"=IFERROR(AVERAGE({get_column_letter(col)}{data_start}:{get_column_letter(col)}{data_end}),\"\")"
-        ws.cell(overall_r, col).number_format = "0.00%"
-        ws.cell(overall_r, col+1).value = f"=IFERROR(AVERAGE({get_column_letter(col+1)}{data_start}:{get_column_letter(col+1)}{data_end}),\"\")"
-        ws.cell(overall_r, col+1).number_format = "0.00%"
-        ws.cell(overall_r, col+2).value = f"=IFERROR(AVERAGE({get_column_letter(col+2)}{data_start}:{get_column_letter(col+2)}{data_end}),\"\")"
-        ws.cell(overall_r, col+2).number_format = "0.00%"
-        for cc in [col, col+1, col+2]:
-            c = ws.cell(overall_r, cc)
+        for _kk in ks:
+            ws.cell(overall_r, col).value = f"=IFERROR(AVERAGE({get_column_letter(col)}{data_start}:{get_column_letter(col)}{data_end}),\"\")"
+            ws.cell(overall_r, col).number_format = "0.00%"
+            c = ws.cell(overall_r, col)
             c.font = Font(bold=True, size=10, name="Malgun Gothic")
             c.fill = styles["header2"]["fill"]
             c.border = styles["data"]["border"]
             c.alignment = styles["data_center"]["align"]
-        col += 3
+            col += 1
 
     # ===== 매트릭스 강조(과하지 않게): 각 도메인 행에서 P@1 최고값만 은은하게 표시 =====
-    # P@1 컬럼들: 2,5,8,... (모델당 3칸 중 첫번째)
-    p1_cols = [2 + 3 * i for i in range(len(models_mapping))]
+    # P@1 컬럼들: 2, 2+len(ks), 2+2*len(ks) ...
+    p1_cols = [2 + len(ks) * i for i in range(len(models_mapping))]
     for rr in range(data_start, overall_r + 1):
         # 데이터가 없으면(빈칸만) 하이라이트하지 않음
         p1_cells = ",".join([f"{get_column_letter(c)}{rr}" for c in p1_cols])
@@ -1018,8 +1133,25 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
                 ),
             )
 
+    # N/A(표본부족) 표시는 회색/이탤릭으로(숫자와 구분)
+    matrix_last_col = get_column_letter(len(header_row_2))
+    ws.conditional_formatting.add(
+        f"B{data_start}:{matrix_last_col}{overall_r}",
+        FormulaRule(formula=[f'B{data_start}="N/A"'], font=styles["na"]["font"], stopIfTrue=False),
+    )
+
     # Freeze header for the sheet top (ranking)
     ws.freeze_panes = f"A{header_row+1}"
+
+    # 오른쪽 빈 공간이 커 보이지 않도록, 매트릭스 마지막 컬럼 이후는 기본 숨김(Q~Z)
+    try:
+        last_used_col = ws.max_column
+        # 최소한 A~P까지는 열어두고(Q부터 숨김)
+        start_hide = max(last_used_col + 1, 17)  # Q=17
+        for idx in range(start_hide, 27):  # Q(17) ~ Z(26)
+            ws.column_dimensions[get_column_letter(idx)].hidden = True
+    except Exception:
+        pass
 
 
 def create_runs_sheet(wb, runs, styles):
@@ -1029,43 +1161,51 @@ def create_runs_sheet(wb, runs, styles):
     - 원본/JSON/툴응답은 숨김 컬럼으로 유지(사용자가 필요시 펼치기)
     """
     ws = wb.create_sheet("런", 1)
-    ws.append(["Run 단위 케이스 (스코어/실패원인 먼저 → 필요 시 원문 펼치기)"])
-    ws.merge_cells("A1:U1")
+    ws.append(["Run 단위 결과(요약) — Result/Reward 중심으로 빠르게 보기"])
+    ws.merge_cells("A1:J1")
     ws["A1"].font = styles["title"]["font"]
     ws["A1"].alignment = styles["title"]["align"]
     ws.row_dimensions[1].height = 22
 
-    ws.append(["읽는 법: (1) 종료사유/조기종료? (2) RewardBasis/RB_* 중 0인 축 (3) 누락툴/깨진 assertion 확인. 원문(JSON/툴로그)은 숨김 컬럼을 펼치면 됩니다."])
-    ws.merge_cells("A2:U2")
+    ws.append(["읽는 법: Result(PASS/FAIL) → Reward → Error Type/Info 확인. 원문(JSON/툴로그)은 숨김 컬럼을 펼치면 됩니다."])
+    ws.merge_cells("A2:J2")
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 32
 
     # Pass@k 관련 주의(표본 부족이면 0으로 보일 수 있음)
-    ws.append(["주의: Pass@2/Pass@4는 해당 Task의 총시행(n)이 각각 2/4 미만이면 '계산 불가'라서 0으로 표시될 수 있습니다(FAIL 반영이 안 된 게 아니라 표본 부족)."])
-    ws.merge_cells("A3:U3")
+    ws.append(["주의: num_trials=1이면 P@1(성공률)만 의미 있습니다. P@2/P@4(안정성)는 trials>=2/4로 추가 실행해야 계산됩니다."])
+    ws.merge_cells("A3:J3")
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     ws.row_dimensions[3].height = 28
 
-    # 정보 과다 방지: '스코어/실패원인'을 앞에 배치하고, 원문은 숨김 컬럼으로 이동
+    # 요청한 형태로 간결화(집계는 이 시트 기준으로 수행)
     headers = [
-        "RunID", "모델", "도메인", "TaskID", "Trial",
-        "종료사유", "조기종료?", "Reward", "PASS?",
-        "RewardBasis",
-        "RB_ENV_ASSERTION", "RB_ACTION", "RB_DB", "RB_COMMUNICATE", "RB_NL_ASSERTION",
-        "필수툴(GT)", "호출툴(모델)", "누락툴",
-        "깨진 env_assertions", "action_checks 불일치",
-        "실패분류(L1/L2)",
+        "Result",        # A (PASS/FAIL)
+        "Model",         # B
+        "Domain",        # C
+        "TaskIdx",       # D
+        "Reward",        # E
+        "Query",         # F
+        "정답(GT)",      # G
+        "모델 응답",     # H
+        "Error Type",    # I
+        "Error Info",    # J
     ]
     hidden_headers = [
-        "결과(PASS/FAIL)",
-        "사용자 첫 발화(원문)",
-        "요청(원문: 시나리오 JSON)",
+        "RunID",
+        "Trial",
+        "Termination",
+        "RewardBasis",
+        "RB_ENV_ASSERTION", "RB_ACTION", "RB_DB", "RB_COMMUNICATE", "RB_NL_ASSERTION",
+        "RequiredTools(GT)", "CalledTools(Model)", "MissingTools",
+        "FailedEnvAssertions", "ActionMismatches",
+        "UserFirstUtterance(원문)",
+        "UserScenario(원문 JSON)",
         "GT(원문 JSON)",
-        "모델 tool_calls(원문)",
-        "툴결과(원문)",
-        "모델 최종응답(원문)",
-        "왜 맞/틀(한줄)",
-        "왜 맞/틀(상세)",
+        "ToolCalls(원문)",
+        "ToolResults(원문)",
+        "ModelFinal(원문)",
+        "Why(상세)",
         "RewardBreakdown(JSON)",
         "ToolArgsJSONErrorCount",
         "ToolArgsJSONErrorSummary",
@@ -1080,7 +1220,6 @@ def create_runs_sheet(wb, runs, styles):
         c.border = styles["header"]["border"]
 
     for run in runs:
-        rb = run.get("RewardBreakdown") or {}
         tool_args_err_cnt = int(run.get("ToolArgsJSONErrorCount") or 0)
         tool_args_err_summary = run.get("ToolArgsJSONErrorSummary") or ""
         term = str(run.get("Termination") or "")
@@ -1108,16 +1247,30 @@ def create_runs_sheet(wb, runs, styles):
             tool_args_err_summary=tool_args_err_summary,
         )
 
+        # 노출 컬럼(요약)
+        result = "PASS" if run.get("Pass")==1 else "FAIL"
+        task_idx = run.get("TaskIdx") or ""
+        query = _truncate_for_excel(first_user_raw or _summarize_request(req_raw), 520)
+        gt_short = _truncate_for_excel(_summarize_gt(gt_raw), 520)
+        model_resp = _truncate_for_excel(agent_final_raw, 520)
+        err_type = "" if result == "PASS" else (fail_tag or term or "FAIL")
+        err_info = "" if result == "PASS" else _truncate_for_excel(why_one + ("\n" + why_detail if why_detail else ""), 520)
+
         row = [
-            run.get("RunID",""),
+            result,
             run.get("ModelLabel",""),
             run.get("Domain",""),
-            run.get("TaskID",""),
+            task_idx,
+            run.get("Reward",0.0),
+            query,
+            gt_short,
+            model_resp,
+            err_type,
+            err_info,
+            # hidden(집계/디버깅)
+            run.get("RunID",""),
             run.get("Trial",0),
             term,
-            "Y" if term not in {"agent_stop", "user_stop"} else "N",
-            run.get("Reward",0.0),
-            "PASS" if run.get("Pass")==1 else "FAIL",
             run.get("RewardBasisRaw",""),
             run.get("RB_ENV_ASSERTION"),
             run.get("RB_ACTION"),
@@ -1129,16 +1282,12 @@ def create_runs_sheet(wb, runs, styles):
             ", ".join(missing_tools) if missing_tools else "",
             "\n".join(failed_env_assertions) if failed_env_assertions else "",
             "\n".join(action_mismatches) if action_mismatches else "",
-            fail_tag,
-            # hidden
-            "PASS" if run.get("Pass")==1 else "FAIL",
             first_user_raw,
             req_raw,
             gt_raw,
             tool_calls_raw,
             tool_results_raw,
             agent_final_raw,
-            why_one,
             why_detail,
             run.get("RewardBreakdownJSON",""),
             run.get("ToolArgsJSONErrorCount", 0),
@@ -1151,30 +1300,29 @@ def create_runs_sheet(wb, runs, styles):
         for col_idx in range(1, len(headers) + len(hidden_headers) + 1):
             cell = ws.cell(r, col_idx)
             cell.border = styles["data"]["border"]
-            if col_idx in [5,6,7,8,9]:
-                cell.alignment = styles["data_center"]["align"]
-            elif col_idx in [11,12,13,14,15]:
+            if col_idx in [1,4,5]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
         # 결과 색
-        rc = ws.cell(r, 9)  # PASS?
+        rc = ws.cell(r, 1)  # Result
         if run.get("Pass")==1:
             rc.fill = styles["pass"]["fill"]; rc.font = styles["pass"]["font"]
         else:
             rc.fill = styles["fail"]["fill"]; rc.font = styles["fail"]["font"]
-        ws.row_dimensions[r].height = 84
+        ws.row_dimensions[r].height = 66
 
     # ===== PASS/FAIL 행 강조(과하지 않게, 연한 배경) =====
     first_data_row = hrow + 1
     last_data_row = ws.max_row
-    # 보이는 핵심 영역(A~U)만 연하게 칠함(숨김 컬럼까지 칠하면 지저분해 보일 수 있음)
-    vis_range = f"A{first_data_row}:U{last_data_row}"
+    # 보이는 핵심 영역만 연하게 칠함(숨김 컬럼까지 칠하면 지저분해 보일 수 있음)
+    last_vis_col = get_column_letter(len(headers))
+    vis_range = f"A{first_data_row}:{last_vis_col}{last_data_row}"
     # PASS 행
     ws.conditional_formatting.add(
         vis_range,
         FormulaRule(
-            formula=[f'$I{first_data_row}="PASS"'],
+            formula=[f'$A{first_data_row}="PASS"'],
             fill=styles["pass_row"]["fill"],
             stopIfTrue=False,
         ),
@@ -1183,46 +1331,52 @@ def create_runs_sheet(wb, runs, styles):
     ws.conditional_formatting.add(
         vis_range,
         FormulaRule(
-            formula=[f'$I{first_data_row}="FAIL"'],
+            formula=[f'$A{first_data_row}="FAIL"'],
             fill=styles["fail_row"]["fill"],
             stopIfTrue=False,
         ),
     )
-    # FAIL이면 "종료사유(F)" + "실패분류(U)"를 조금 더 눈에 띄게
-    fail_focus_range = f"F{first_data_row}:F{last_data_row}"
+    # FAIL이면 Error Type/Info를 조금 더 눈에 띄게
+    fail_focus_range = f"I{first_data_row}:I{last_data_row}"
     ws.conditional_formatting.add(
         fail_focus_range,
         FormulaRule(
-            formula=[f'$I{first_data_row}="FAIL"'],
+            formula=[f'$A{first_data_row}="FAIL"'],
             font=styles["fail_strong_font"]["font"],
             stopIfTrue=False,
         ),
     )
-    fail_focus_range2 = f"U{first_data_row}:U{last_data_row}"
+    fail_focus_range2 = f"J{first_data_row}:J{last_data_row}"
     ws.conditional_formatting.add(
         fail_focus_range2,
         FormulaRule(
-            formula=[f'$I{first_data_row}="FAIL"'],
+            formula=[f'$A{first_data_row}="FAIL"'],
             font=styles["fail_strong_font"]["font"],
             stopIfTrue=False,
         ),
     )
 
     ws.freeze_panes = f"A{hrow+1}"
-    ws.auto_filter.ref = f"A{hrow}:{get_column_letter(len(headers)+len(hidden_headers))}{ws.max_row}"
+    ws.auto_filter.ref = f"A{hrow}:{get_column_letter(len(headers))}{ws.max_row}"
 
     # Column widths (핵심만 보이게)
     widths = {
-        "A":34, "B":22, "C":10, "D":10, "E":6,
-        "F":12, "G":10, "H":8, "I":8,
-        "J":26,
-        "K":14, "L":10, "M":10, "N":14, "O":14,
-        "P":22, "Q":22, "R":22,
-        "S":36, "T":36,
-        "U":26,
+        "A":8,   # Result
+        "B":26,  # Model
+        "C":10,  # Domain
+        "D":7,   # TaskIdx
+        "E":8,   # Reward
+        "F":54,  # Query
+        "G":54,  # GT
+        "H":54,  # Model response
+        "I":18,  # Error Type
+        "J":54,  # Error Info
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
+
+    # 기본은 "핵심"만 보이게: 디버깅용(RewardBasis/RB_*/툴목록/검증상세)은 접어두기
+    # - PASS/FAIL + 종료사유 + 실패분류 + 요약 컬럼만으로도 판단 가능하게 구성
     # 숨김 컬럼(원문/디버깅): headers 다음부터 전부 숨김
     start_hidden = len(headers) + 1
     end_hidden = len(headers) + len(hidden_headers)
@@ -1235,7 +1389,7 @@ def create_turns_sheet(wb, turns_rows, styles):
     """턴 단위(대화 흐름을 직관적으로 보는 시트)."""
     ws = wb.create_sheet("대화", 2)
     ws.append(["대화 흐름(원문) + 툴콜/툴결과를 한눈에"])
-    ws.merge_cells("A1:N1")
+    ws.merge_cells("A1:Q1")
     ws["A1"].font = styles["title"]["font"]
     ws["A1"].alignment = styles["title"]["align"]
     ws.row_dimensions[1].height = 22
@@ -1245,12 +1399,12 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws["A2"].alignment = styles["data"]["align"]
     ws.row_dimensions[2].height = 28
 
-    ws.append(["색상: TOOL_CALL=연노랑 / TOOL_RESULT=연회색. 사용법: (1) RunID 필터 → (2) TurnIdx 오름차순 → (3) Kind=TOOL_* 행에서 ToolName/Args/Result 확인"])
-    ws.merge_cells("A3:N3")
+    ws.append(["색상: TOOL_CALL=연노랑 / TOOL_RESULT=연회색. 기본은 '요약'만 보이고, 원문은 숨김 컬럼을 펼치면 됩니다."])
+    ws.merge_cells("A3:Q3")
     ws["A3"].alignment = styles["data"]["align"]
     ws.row_dimensions[3].height = 28
 
-    headers = [
+    headers = [  # visible
         "RunID",
         "모델",
         "도메인",
@@ -1261,12 +1415,17 @@ def create_turns_sheet(wb, turns_rows, styles):
         "Role",
         "Kind",
         "ToolName(요약)",
+        "ToolArgs(요약)",
+        "Text(요약)",
+        "ToolResult(요약)",
+    ]
+    hidden_headers = [
         "ToolArgs(원문)",
         "Text(원문)",
         "ToolResult(원문)",
         "ToolCalls(JSON 원문)",
     ]
-    ws.append(headers)
+    ws.append(headers + hidden_headers)
     header_row = ws.max_row
     for c in ws[header_row]:
         c.font = styles["header"]["font"]
@@ -1274,9 +1433,25 @@ def create_turns_sheet(wb, turns_rows, styles):
         c.alignment = styles["header"]["align"]
         c.border = styles["header"]["border"]
     for row in turns_rows:
-        ws.append(row)
+        # turns_rows: [RunID, 모델, 도메인, TaskID, Trial, PASS?, TurnIdx, Role, Kind, ToolName, ToolArgsRaw, TextRaw, ToolResultRaw, ToolCallsJSON]
+        tool_args_raw = row[10] if len(row) > 10 else ""
+        text_raw = row[11] if len(row) > 11 else ""
+        tool_res_raw = row[12] if len(row) > 12 else ""
+        tool_calls_json = row[13] if len(row) > 13 else ""
+        ws.append(
+            row[:10]
+            + [
+                _truncate_for_excel(tool_args_raw, 360),
+                _truncate_for_excel(text_raw, 420),
+                _truncate_for_excel(tool_res_raw, 420),
+                tool_args_raw,
+                text_raw,
+                tool_res_raw,
+                tool_calls_json,
+            ]
+        )
     for r in range(header_row + 1, ws.max_row + 1):
-        for c in range(1, len(headers) + 1):
+        for c in range(1, len(headers) + len(hidden_headers) + 1):
             cell = ws.cell(r, c)
             cell.border = styles["data"]["border"]
             # Trial/PASS?/TurnIdx/Role/Kind는 가운데 정렬
@@ -1311,7 +1486,7 @@ def create_turns_sheet(wb, turns_rows, styles):
 
     # ===== TOOL_CALL / TOOL_RESULT 행 강조(조건부 서식) =====
     # PASS? 컬럼(F)은 PASS/FAIL이 최우선이어야 하므로, TOOL 강조 범위에서 제외한다.
-    # ToolCalls(JSON 원문) 컬럼은 숨김이므로, 보이는 범위까지만(A~M, 단 F 제외)
+    # 원문 컬럼은 숨김이므로, 보이는 범위까지만(A~M, 단 F 제외)
     vis_left = f"A{first_data_row}:E{last_data_row}"
     vis_right = f"G{first_data_row}:M{last_data_row}"
     for rng in [vis_left, vis_right]:
@@ -1333,7 +1508,7 @@ def create_turns_sheet(wb, turns_rows, styles):
         )
 
     ws.freeze_panes = f"A{header_row+1}"
-    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{ws.max_row}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers)+len(hidden_headers))}{ws.max_row}"
 
     ws.column_dimensions["A"].width = 34
     ws.column_dimensions["B"].width = 24
@@ -1345,12 +1520,16 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws.column_dimensions["H"].width = 10  # Role
     ws.column_dimensions["I"].width = 12  # Kind
     ws.column_dimensions["J"].width = 24  # ToolName
-    ws.column_dimensions["K"].width = 44  # ToolArgs
-    ws.column_dimensions["L"].width = 54  # Text
-    ws.column_dimensions["M"].width = 54  # ToolResult
-    ws.column_dimensions["N"].width = 50  # ToolCalls(JSON)
-    # ToolCalls(JSON)은 필요할 때만 펼치기
-    ws.column_dimensions["N"].hidden = True
+    ws.column_dimensions["K"].width = 42  # ToolArgs(요약)
+    ws.column_dimensions["L"].width = 54  # Text(요약)
+    ws.column_dimensions["M"].width = 54  # ToolResult(요약)
+    # 숨김(원문)
+    ws.column_dimensions["N"].width = 50  # ToolArgs(원문)
+    ws.column_dimensions["O"].width = 60  # Text(원문)
+    ws.column_dimensions["P"].width = 60  # ToolResult(원문)
+    ws.column_dimensions["Q"].width = 60  # ToolCalls(JSON)
+    for col_letter in ["N", "O", "P", "Q"]:
+        ws.column_dimensions[col_letter].hidden = True
     return ws
     
     # Title
@@ -1830,6 +2009,8 @@ def generate_report(
 
     # GT(정답) 성격: TAU2는 단일 정답 문자열이 아니라 "필수 액션/체크"의 집합
     gt_map: dict[tuple[str, str], str] = {}
+    # (domain, task_id) -> 태스크셋에서의 순번(정렬 안정성)
+    task_order_map: dict[tuple[str, str], int] = {}
 
     # 결과 JSON 파일 전체를 스캔해서 모델/도메인/시뮬레이션을 추출
     runs: list[dict] = []
@@ -1855,8 +2036,9 @@ def generate_report(
         display_name = models_mapping[agent_llm]
 
         # GT 맵 구성 (task_id -> required action tool names)
-        for t in data.get("tasks", []) or []:
+        for idx_t, t in enumerate(data.get("tasks", []) or [], start=1):
             tid = str(t.get("id"))
+            task_order_map[(domain, tid)] = idx_t
             crit = (t.get("evaluation_criteria") or {})
             actions = crit.get("actions") or []
             # 원본 GT: actions + env_assertions(원문 그대로)
@@ -1918,6 +2100,7 @@ def generate_report(
                     "Model": display_name,
                     "Domain": domain,
                     "TaskID": task_id,
+                    "TaskIdx": task_order_map.get((domain, str(task_id))),
                     "Trial": int(trial),
                     "Pass": is_pass,
                     "Reward": float(reward),
@@ -2054,6 +2237,8 @@ def generate_report(
                     "AgentLLM": agent_llm,
                     "Domain": domain,
                     "TaskID": task_id,
+                    # TaskIdx: 태스크셋에서의 순번(텍스트 TaskID여도 정렬/필터 안정성 확보)
+                    "TaskIdx": task_order_map.get((domain, str(task_id))),
                     "Trial": int(trial),
                     "Pass": is_pass,
                     "Reward": float(reward),
@@ -2120,10 +2305,44 @@ def generate_report(
     ws_dom.column_dimensions["B"].width = 10
     ws_dom.column_dimensions["C"].width = 60
 
-    # ===== 3-sheet layout (visible) =====
-    create_summary_sheet(wb, models_mapping, domains, styles)     # 요약(랭킹+매트릭스+Glossary)
-    create_runs_sheet(wb, runs, styles)                           # 런(케이스 단위, 원본 + 실패사유)
-    create_turns_sheet(wb, turns_rows, styles)                    # 대화(원문 + TOOL_CALL/RESULT)
+    # ===== 2-sheet layout (visible) =====
+    # 요약 시트에서 런 시트의 ToolArgsJSONErrorCount 컬럼을 정확히 참조하기 위해,
+    # 런 시트를 먼저 만들고 헤더에서 해당 컬럼 위치를 탐지한다.
+    ws_runs = create_runs_sheet(wb, runs, styles)                 # 런(케이스 단위, 원본 + 실패사유)
+
+    # max_trials(=num_trials) 추정: Trial 값이 0..n-1이라고 가정
+    max_trials_seen = 1
+    try:
+        max_trials_seen = (max((int(r.get("Trial") or 0) for r in runs), default=0) + 1) if runs else 1
+    except Exception:
+        max_trials_seen = 1
+
+    # 런 시트 헤더에서 ToolArgsJSONErrorCount 컬럼 letter 찾기
+    tool_err_col_letter = "T"
+    try:
+        header_row_guess = None
+        for rr in range(1, min(15, ws_runs.max_row) + 1):
+            # 새 런 시트는 A열이 Result로 시작
+            if ws_runs.cell(rr, 1).value in {"Result", "RunID"}:
+                header_row_guess = rr
+                break
+        if header_row_guess:
+            for cc in range(1, ws_runs.max_column + 1):
+                if ws_runs.cell(header_row_guess, cc).value == "ToolArgsJSONErrorCount":
+                    tool_err_col_letter = get_column_letter(cc)
+                    break
+    except Exception:
+        tool_err_col_letter = "T"
+
+    create_summary_sheet(
+        wb,
+        models_mapping,
+        domains,
+        styles,
+        max_trials_seen=max_trials_seen,
+        tool_args_err_col_letter=tool_err_col_letter,
+    )                                                             # 요약(랭킹+매트릭스+Glossary)
+    # 대화 시트는 제거(사용자 요청)
 
     # ===== helper sheets (hidden) =====
     create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles)  # Pass^k 계산용
