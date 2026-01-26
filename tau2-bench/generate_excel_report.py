@@ -18,6 +18,7 @@ try:
     import pandas as pd
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.formatting.rule import FormulaRule
     from openpyxl.utils import get_column_letter
 except ImportError:
     print("Installing required packages...")
@@ -26,6 +27,7 @@ except ImportError:
     import pandas as pd
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.formatting.rule import FormulaRule
     from openpyxl.utils import get_column_letter
 
 def _safe_json_loads(s: str) -> dict:
@@ -223,6 +225,9 @@ def setup_styles():
     header_fill2 = "E7E6E6"
     pass_fill = "E2F0D9"   # 연한 초록
     fail_fill = "FCE4D6"   # 연한 빨강/주황
+    top1_fill = "FFF2CC"   # 1위(은은한 골드)
+    top2_fill = "DDEBF7"   # 2위(은은한 블루)
+    top3_fill = "E7E6E6"   # 3위(은은한 그레이)
     return {
         'title': {
             'font': Font(bold=True, size=14, name="Malgun Gothic"),
@@ -281,7 +286,19 @@ def setup_styles():
         'fail': {
             'fill': PatternFill(start_color=fail_fill, end_color=fail_fill, fill_type="solid"),
             'font': Font(size=9, name="Malgun Gothic", color="9C0006")
-        }
+        },
+        'top1': {
+            'fill': PatternFill(start_color=top1_fill, end_color=top1_fill, fill_type="solid"),
+            'font': Font(bold=True, size=10, name="Malgun Gothic"),
+        },
+        'top2': {
+            'fill': PatternFill(start_color=top2_fill, end_color=top2_fill, fill_type="solid"),
+            'font': Font(bold=True, size=9, name="Malgun Gothic"),
+        },
+        'top3': {
+            'fill': PatternFill(start_color=top3_fill, end_color=top3_fill, fill_type="solid"),
+            'font': Font(bold=True, size=9, name="Malgun Gothic"),
+        },
     }
 
 def _extract_tool_args_json_errors(messages: list[dict]) -> tuple[int, str, str]:
@@ -780,7 +797,10 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
         ws.cell(row=row_num, column=5).value = f'=IFERROR(AVERAGEIF(Task별_집계!A:A, B{row_num}, Task별_집계!I:I),"")'
         ws.cell(row=row_num, column=5).number_format = '0.00%'
         # RankKey: Pass@1 > Pass@2 > Pass@4 우선, 동점은 행번호로 안정화
-        ws.cell(row=row_num, column=6).value = f"=C{row_num}*1000000 + D{row_num}*1000 + E{row_num} + ROW()/1000000000"
+        # NOTE: 빈칸/텍스트가 섞여도 랭킹이 깨지지 않도록 N()로 숫자 강제
+        ws.cell(row=row_num, column=6).value = (
+            f"=N(C{row_num})*1000000 + N(D{row_num})*1000 + N(E{row_num}) + ROW()/1000000000"
+        )
 
         # Apply styles (이 행 전체)
         for col_idx in range(1, 6 + 1):
@@ -793,9 +813,28 @@ def create_summary_sheet(wb, models_mapping, domains, styles):
 
     last_data_row = ws.max_row
     # 순위 수식 입력
+    # NOTE: COUNTIF("> "&F{r})는 F가 텍스트/빈값 취급되는 케이스에서 모두 같은 순위로 깨질 수 있어
+    #       SUMPRODUCT 비교식으로 안전하게 랭킹을 계산한다.
     for r in range(first_data_row, last_data_row + 1):
-        ws.cell(row=r, column=1).value = f"=1+COUNTIF($F${first_data_row}:$F${last_data_row},\">\"&F{r})"
+        ws.cell(row=r, column=1).value = (
+            f"=IF(F{r}=\"\",\"\",1+SUMPRODUCT(--($F${first_data_row}:$F${last_data_row}>F{r})))"
+        )
         ws.cell(row=r, column=1).alignment = styles["data_center"]["align"]
+
+    # ===== 랭킹 강조(과하지 않게 1/2/3위만) =====
+    rank_range = f"A{first_data_row}:E{last_data_row}"
+    ws.conditional_formatting.add(
+        rank_range,
+        FormulaRule(formula=[f"$A{first_data_row}=1"], fill=styles["top1"]["fill"], font=styles["top1"]["font"], stopIfTrue=True),
+    )
+    ws.conditional_formatting.add(
+        rank_range,
+        FormulaRule(formula=[f"$A{first_data_row}=2"], fill=styles["top2"]["fill"], font=styles["top2"]["font"], stopIfTrue=True),
+    )
+    ws.conditional_formatting.add(
+        rank_range,
+        FormulaRule(formula=[f"$A{first_data_row}=3"], fill=styles["top3"]["fill"], font=styles["top3"]["font"], stopIfTrue=True),
+    )
 
     # RankKey 컬럼 숨김
     ws.column_dimensions["F"].hidden = True
