@@ -8,6 +8,32 @@
 - **실행 스크립트**: `tau2-bench/run_evaluation.sh`
 - **리포트 생성기**: `tau2-bench/generate_excel_report.py`
 
+## 빠른 시작(추천)
+
+가장 흔한 목적은 “5개 모델을 비용 절감으로 빠르게 비교하고, 엑셀로 확인”입니다.
+
+### 1) API 키 준비
+
+```bash
+cp .env.example .env
+# .env에 OPENROUTER_API_KEY를 채운 뒤
+set -a
+source .env
+set +a
+```
+
+### 2) 450회 Quick 실행(3도메인×30태스크×5모델×1trial) + latest 리포트 생성
+
+```bash
+cd tau2-bench
+./run_quick_450.sh
+```
+
+### 3) 결과 확인(항상 이 경로로 고정)
+
+- **전체 요약**: `tau2-bench/results/latest/전체_요약/TAU2_전체요약_latest.xlsx`
+- **모델별**: `tau2-bench/results/latest/모델별/<모델라벨>/TAU2_<모델라벨>_latest.xlsx`
+
 ## TAU2 평가 의도(무엇을 측정하나)
 
 τ²-bench는 “정답 텍스트 한 줄”을 맞히는 벤치마크가 아니라, **고객센터 시나리오에서 에이전트가 정책을 지키며 도구를 사용해 상태(DB)를 올바르게 바꾸고, 사용자에게 필요한 정보를 전달하는지**를 측정합니다. 오케스트레이터가 Agent ↔ UserSimulator ↔ Environment(툴/DB)를 중재하며 여러 턴의 대화를 시뮬레이션합니다(업스트림 `tau2-bench/README.md`의 Orchestration Sequence Diagram 참고).
@@ -68,9 +94,9 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
 {
   "task_id": "[mobile_data_issue]airplane_mode_on|user_abroad_roaming_enabled_off[PERSONA:None]",
   "request": {
-    "reason_for_call": "You mobile data is not working properly. It either stops working or is very slow. You want to fix it and absolutely want to get excellent internet speed on your phone. You are not willing to accept any other internet speed (poor, fair or good). You do not have access to wifi.",
-    "known_info": "You are John Smith with phone number 555-123-2002. You are currently abroad in France.",
-    "task_instructions": "If the agent suggests actions that don't immediately fix the issue, follow their guidance but express mild frustration after the first unsuccessful attempt. You will consider the issue resolved only when speed test returns excellent internet speed and nothing else. If it returns poor, fair or good, you will not consider the issue resolved. You are willing to refuel 2.0 GB of data if necessary, but you do not want to change your mobile data plan. If the tool call does not return updated status information, you might need to perform another tool call to get the updated status. \nWhenever the agent asks you about your device, always ground your responses on the results of tool calls. \nFor example: If the agent asks what the status bar shows, always ground your response on the results of the `get_status_bar` tool call. If the agent asks if you are able to send an MMS message, always ground your response on the results of the `can_send_mms` tool call.\nNever make up the results of tool calls, always ground your responses on the results of tool calls.\nIf you are unsure about whether an action is necessary, always ask the agent for clarification.\n"
+    "reason_for_call": "(발췌) 해외에서 모바일 데이터가 느리거나 끊김. 반드시 excellent 속도여야 해결 인정. Wi‑Fi 없음.",
+    "known_info": "(발췌) 사용자/전화번호/현재 위치 등",
+    "task_instructions": "(길어서 생략) 사용자 시뮬레이터 규칙/대화 제약. 원문은 시뮬레이션 JSON 또는 엑셀의 원문 컬럼에서 확인"
   },
   "gt": {
     "actions": [
@@ -113,7 +139,7 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
       }
     ]
   },
-  "model_response": "[TOOL_CALLStransfer_to_human_agents[ARGS{\"summary\": \"User is experiencing slow mobile data speeds while abroad in France. They have a 10.0 GB data plan and are not interested in changing it. Basic troubleshooting steps have been attempted without success. The user requires excellent internet speed for their needs.\"}",
+  "model_response": "[TOOL_CALLStransfer_to_human_agents[ARGS{\"summary\": \"...\"}",
   "model_tool_calls": null
 }
 ```
@@ -121,25 +147,6 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
 **이 샘플에서의 판단 포인트**
 - `model_tool_calls`가 **null**이면 실제 툴 호출이 발생하지 않습니다.  
 - 평가 기준(`gt.actions`, `gt.env_assertions`)은 **툴 호출/상태 변화가 전제**이므로, 이 경우 **FAIL**로 처리됩니다.
-
----
-
-## 모델별 툴콜/검증 결과 비교표 (telecom 1회 샘플)
-
-아래는 telecom 결과 JSON의 첫 번째 trial 기준 요약입니다.  
-`assistant tool_calls 수`가 0이면 **모델이 구조화된 툴 호출을 내지 못한 것**을 의미합니다.
-
-| 모델 | assistant tool_calls 수 | user tool_calls 수 | Action Checks(성공/전체) | Env Assertions(성공/전체) | Reward |
-|---|---:|---:|---|---|---:|
-| openrouter/meta-llama/llama-3.3-70b-instruct | 0 | 5 | 2/2 | 2/2 | 1.0 |
-| openrouter/mistralai/mistral-small-3.2-24b-instruct | 0 | 0 | 0/2 | 0/2 | 0.0 |
-| openrouter/qwen/qwen3-32b | 실행 결과 없음 | - | - | - | - |
-| openrouter/qwen/qwen3-14b | 실행 결과 없음 | - | - | - | - |
-| openrouter/qwen/qwen3-next-80b-a3b-instruct | 실행 결과 없음 | - | - | - | - |
-
-**해석 팁**
-- `Action Checks`는 **requestor가 user/assistant인지**에 따라 실행 주체가 달라질 수 있습니다.  
-- 이 표는 “툴콜이 실제로 들어왔는지(assistant tool_calls 수)”와 “평가 기준이 충족됐는지”를 분리해서 보여줍니다.
 
 ## 평가 카테고리(도메인)
 
@@ -232,22 +239,8 @@ OpenRouter는 LiteLLM provider로 호출됩니다.
 
 - **모델 표기 규칙**: `openrouter/<provider>/<model>` 형태
 - **API 키 설정(.env 권장)**:
-
-가장 간단한 방식은 `.env.example`을 복사해서 `.env`를 만들고, 쉘에 로드하는 것입니다.
-
-```bash
-cp .env.example .env
-# .env에 OPENROUTER_API_KEY를 채운 뒤
-set -a
-source .env
-set +a
-```
-
-```bash
-export OPENROUTER_API_KEY="YOUR_KEY"
-```
-
-키는 절대 커밋하지 마세요. (`.gitignore`에 `.env`가 포함되어 있습니다.)
+  - 상단 “빠른 시작”을 따르세요( `.env` 로딩 포함).
+  - 키는 절대 커밋하지 마세요. (`.gitignore`에 `.env`가 포함되어 있습니다.)
 
 ## OpenRouter로 모델 실력 검증: 빠른 사용법(테이블)
 
