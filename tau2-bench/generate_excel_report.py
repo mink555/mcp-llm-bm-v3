@@ -225,6 +225,8 @@ def setup_styles():
     header_fill2 = "E7E6E6"
     pass_fill = "E2F0D9"   # 연한 초록
     fail_fill = "FCE4D6"   # 연한 빨강/주황
+    pass_row_fill = "F3FAF1"  # 아주 연한 초록(행 강조)
+    fail_row_fill = "FFF4F0"  # 아주 연한 주황(행 강조)
     top1_fill = "FFF2CC"   # 1위(은은한 골드)
     top2_fill = "DDEBF7"   # 2위(은은한 블루)
     top3_fill = "E7E6E6"   # 3위(은은한 그레이)
@@ -286,6 +288,15 @@ def setup_styles():
         'fail': {
             'fill': PatternFill(start_color=fail_fill, end_color=fail_fill, fill_type="solid"),
             'font': Font(size=9, name="Malgun Gothic", color="9C0006")
+        },
+        'pass_row': {
+            'fill': PatternFill(start_color=pass_row_fill, end_color=pass_row_fill, fill_type="solid"),
+        },
+        'fail_row': {
+            'fill': PatternFill(start_color=fail_row_fill, end_color=fail_row_fill, fill_type="solid"),
+        },
+        'fail_strong_font': {
+            'font': Font(bold=True, size=9, name="Malgun Gothic", color="9C0006"),
         },
         'top1': {
             'fill': PatternFill(start_color=top1_fill, end_color=top1_fill, fill_type="solid"),
@@ -1128,6 +1139,49 @@ def create_runs_sheet(wb, runs, styles):
         else:
             rc.fill = styles["fail"]["fill"]; rc.font = styles["fail"]["font"]
         ws.row_dimensions[r].height = 84
+
+    # ===== PASS/FAIL 행 강조(과하지 않게, 연한 배경) =====
+    first_data_row = hrow + 1
+    last_data_row = ws.max_row
+    # 보이는 핵심 영역(A~U)만 연하게 칠함(숨김 컬럼까지 칠하면 지저분해 보일 수 있음)
+    vis_range = f"A{first_data_row}:U{last_data_row}"
+    # PASS 행
+    ws.conditional_formatting.add(
+        vis_range,
+        FormulaRule(
+            formula=[f'$I{first_data_row}="PASS"'],
+            fill=styles["pass_row"]["fill"],
+            stopIfTrue=False,
+        ),
+    )
+    # FAIL 행
+    ws.conditional_formatting.add(
+        vis_range,
+        FormulaRule(
+            formula=[f'$I{first_data_row}="FAIL"'],
+            fill=styles["fail_row"]["fill"],
+            stopIfTrue=False,
+        ),
+    )
+    # FAIL이면 "종료사유(F)" + "실패분류(U)"를 조금 더 눈에 띄게
+    fail_focus_range = f"F{first_data_row}:F{last_data_row}"
+    ws.conditional_formatting.add(
+        fail_focus_range,
+        FormulaRule(
+            formula=[f'$I{first_data_row}="FAIL"'],
+            font=styles["fail_strong_font"]["font"],
+            stopIfTrue=False,
+        ),
+    )
+    fail_focus_range2 = f"U{first_data_row}:U{last_data_row}"
+    ws.conditional_formatting.add(
+        fail_focus_range2,
+        FormulaRule(
+            formula=[f'$I{first_data_row}="FAIL"'],
+            font=styles["fail_strong_font"]["font"],
+            stopIfTrue=False,
+        ),
+    )
 
     ws.freeze_panes = f"A{hrow+1}"
     ws.auto_filter.ref = f"A{hrow}:{get_column_letter(len(headers)+len(hidden_headers))}{ws.max_row}"
