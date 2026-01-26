@@ -114,7 +114,7 @@ class ParticipantMessageBase(BaseModel):
         """
         if not (self.has_text_content() or self.is_tool_call()):
             raise ValueError(
-                f"AssistantMessage must have either content or tool calls. Got {self}"
+                f"ParticipantMessage must have either content or tool calls. Got {self}"
             )
 
     def has_text_content(self) -> bool:

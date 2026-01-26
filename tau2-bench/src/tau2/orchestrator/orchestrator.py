@@ -466,7 +466,17 @@ class Orchestrator:
             user_msg, self.user_state = self.user.generate_next_message(
                 self.message, self.user_state
             )
-            user_msg.validate()
+            try:
+                user_msg.validate()
+            except Exception as e:
+                # User simulator protocol violation (e.g., empty content and no tool_calls)
+                self.num_errors += 1
+                self.done = True
+                self.termination_reason = TerminationReason.USER_ERROR
+                # still record for debugging
+                self.trajectory.append(user_msg)
+                logger.warning(f"USER_ERROR: invalid user message: {e}. message={user_msg}")
+                return
             if UserSimulator.is_stop(user_msg):
                 self.done = True
                 self.termination_reason = TerminationReason.USER_STOP
@@ -484,7 +494,16 @@ class Orchestrator:
             agent_msg, self.agent_state = self.agent.generate_next_message(
                 self.message, self.agent_state
             )
-            agent_msg.validate()
+            try:
+                agent_msg.validate()
+            except Exception as e:
+                # Agent protocol violation (e.g., empty content and no tool_calls)
+                self.num_errors += 1
+                self.done = True
+                self.termination_reason = TerminationReason.AGENT_ERROR
+                self.trajectory.append(agent_msg)
+                logger.warning(f"AGENT_ERROR: invalid agent message: {e}. message={agent_msg}")
+                return
             if self.agent.is_stop(agent_msg):
                 self.done = True
                 self.termination_reason = TerminationReason.AGENT_STOP
