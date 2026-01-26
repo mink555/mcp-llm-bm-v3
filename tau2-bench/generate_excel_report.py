@@ -1296,7 +1296,8 @@ def create_turns_sheet(wb, turns_rows, styles):
         FormulaRule(
             formula=[f'$I{first_data_row}="TOOL_CALL"'],
             fill=styles["tool_call_row"]["fill"],
-            stopIfTrue=False,
+            # TOOL_CALL 행은 이 색이 최우선(정신없지 않게 PASS/FAIL 컬럼 색 등 덮어쓰기)
+            stopIfTrue=True,
         ),
     )
     ws.conditional_formatting.add(
@@ -1304,7 +1305,8 @@ def create_turns_sheet(wb, turns_rows, styles):
         FormulaRule(
             formula=[f'$I{first_data_row}="TOOL_RESULT"'],
             fill=styles["tool_result_row"]["fill"],
-            stopIfTrue=False,
+            # TOOL_RESULT 행도 최우선
+            stopIfTrue=True,
         ),
     )
 
@@ -1313,7 +1315,8 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws.conditional_formatting.add(
         pass_col_range,
         FormulaRule(
-            formula=[f'$F{first_data_row}="PASS"'],
+            # TOOL_* 행은 이미 행 전체 색으로 강조되므로 TEXT 행에서만 PASS/FAIL 색을 보여준다.
+            formula=[f'=AND($F{first_data_row}="PASS",$I{first_data_row}<>"TOOL_CALL",$I{first_data_row}<>"TOOL_RESULT")'],
             fill=styles["pass"]["fill"],
             font=styles["pass"]["font"],
             stopIfTrue=False,
@@ -1322,7 +1325,7 @@ def create_turns_sheet(wb, turns_rows, styles):
     ws.conditional_formatting.add(
         pass_col_range,
         FormulaRule(
-            formula=[f'$F{first_data_row}="FAIL"'],
+            formula=[f'=AND($F{first_data_row}="FAIL",$I{first_data_row}<>"TOOL_CALL",$I{first_data_row}<>"TOOL_RESULT")'],
             fill=styles["fail"]["fill"],
             font=styles["fail"]["font"],
             stopIfTrue=False,
