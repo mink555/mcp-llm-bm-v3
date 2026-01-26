@@ -21,7 +21,7 @@ export LITELLM_DISABLE_TELEMETRY="${LITELLM_DISABLE_TELEMETRY:-1}"
 # - PATH에 tau2가 있으면 그대로 사용
 # - 없으면 (python3.13 -> python3 -> python) 중 tau2 import 가능한 인터프리터로 `python -m tau2.cli` 사용
 TAU2=()
-if command -v tau2 >/dev/null 2>&1; then
+if command -v tau2 >/dev/null 2>&1 && tau2 --help >/dev/null 2>&1; then
   TAU2=(tau2)
 else
   for PY in python3.13 python3 python; do
