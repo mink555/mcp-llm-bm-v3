@@ -6,7 +6,7 @@
 
 - **업스트림 벤치마크 코드**: `tau2-bench/` (원본 README 및 코드 유지)
 - **실행 스크립트**: `tau2-bench/run_evaluation.sh`
-- **리포트 생성기**: `tau2-bench/generate_excel_report.py`
+- **리포트 생성기(엔트리)**: `tau2-bench/generate_reports.py` (내부적으로 `generate_excel_report.py` 호출)
 
 ## 빠른 시작(추천)
 
@@ -53,7 +53,8 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
 
 ### 왜 “툴콜”이 핵심인가
 툴 호출이 **구조화된 `tool_calls`로 들어와야** 실제 환경(툴/DB)이 바뀝니다.  
-- 텍스트로 “[TOOL_CALLS ...]”처럼 흉내를 내도 **평가에서는 툴 호출이 없는 것으로 처리**됩니다.
+- 텍스트로 “[TOOL_CALLS ...]”처럼 흉내를 내는 경우가 있는데, 최신 코드에서는 **일부 패턴은 best-effort로 복구 파싱**을 시도합니다.  
+  다만 **완전한 호환을 보장하진 않으므로** 가장 안전한 성공 경로는 “native tool_calls(구조화)”입니다.
 
 ---
 
@@ -86,67 +87,14 @@ TAU2는 **텍스트 정답형 QA가 아니라 행동 기반(agentic) 평가**입
 
 ---
 
-## 실제 JSON 샘플 (telecom 1회 실행 발췌)
+## 실제 값(요청/GT/모델응답/에러)은 어디서 보나?
 
-아래는 `data/simulations/mistral_small_telecom_one.json`에서 **요청/GT/모델 응답을 그대로** 추출한 예시입니다.
+긴 JSON 예시는 README에서 제거했습니다(가독성). 대신 **엑셀 `런` 시트**를 보면 됩니다.
 
-```json
-{
-  "task_id": "[mobile_data_issue]airplane_mode_on|user_abroad_roaming_enabled_off[PERSONA:None]",
-  "request": {
-    "reason_for_call": "(발췌) 해외에서 모바일 데이터가 느리거나 끊김. 반드시 excellent 속도여야 해결 인정. Wi‑Fi 없음.",
-    "known_info": "(발췌) 사용자/전화번호/현재 위치 등",
-    "task_instructions": "(길어서 생략) 사용자 시뮬레이터 규칙/대화 제약. 원문은 시뮬레이션 JSON 또는 엑셀의 원문 컬럼에서 확인"
-  },
-  "gt": {
-    "actions": [
-      {
-        "action_id": "toggle_airplane_mode_0",
-        "requestor": "user",
-        "name": "toggle_airplane_mode",
-        "arguments": {},
-        "info": null,
-        "compare_args": null
-      },
-      {
-        "action_id": "toggle_roaming_1",
-        "requestor": "user",
-        "name": "toggle_roaming",
-        "arguments": {},
-        "info": null,
-        "compare_args": null
-      }
-    ],
-    "env_assertions": [
-      {
-        "env_type": "user",
-        "func_name": "assert_mobile_data_status",
-        "arguments": {
-          "expected_status": true
-        },
-        "assert_value": true,
-        "message": null
-      },
-      {
-        "env_type": "user",
-        "func_name": "assert_internet_speed",
-        "arguments": {
-          "expected_speed": 200,
-          "expected_desc": "excellent"
-        },
-        "assert_value": true,
-        "message": null
-      }
-    ]
-  },
-  "model_response": "[TOOL_CALLStransfer_to_human_agents[ARGS{\"summary\": \"...\"}",
-  "model_tool_calls": null
-}
-```
-
-**이 샘플에서의 판단 포인트**
-- `model_tool_calls`가 **null**이면 실제 툴 호출이 발생하지 않습니다.  
-- 평가 기준(`gt.actions`, `gt.env_assertions`)은 **툴 호출/상태 변화가 전제**이므로, 이 경우 **FAIL**로 처리됩니다.
+- **Query**: 사용자 첫 발화(요청)
+- **정답(GT)**: GT의 actions/env_assertions 요약(원문은 숨김 컬럼)
+- **모델 응답**: 모델의 최종 자연어 응답(원문/툴로그는 숨김 컬럼)
+- **Error Type / Error Info**: FAIL일 때 “왜 실패했는지” 요약
 
 ## 평가 카테고리(도메인)
 
@@ -231,7 +179,7 @@ OpenRouter는 “별도 구현”이 아니라 **LiteLLM provider로 호출**됩
 - **OpenRouter 일시 오류(503/429) 구분**:
   - 모델 실력 문제가 아니라 provider 가용성/레이트리밋일 수 있으니 `--max-concurrency`를 줄이거나 `DELAY_SEC`를 늘려 재시도합니다.
 - **리포트 생성 확인**:
-  - `python3 tau2-bench/generate_excel_report.py` 실행 후 `tau2_evaluation_report.xlsx`가 생성되는지 확인
+  - `python3 tau2-bench/generate_reports.py --results-root tau2-bench/results/latest --input-dir tau2-bench/results/latest/simulations --prune` 실행 후 latest 엑셀이 갱신되는지 확인
 
 ## OpenRouter 설정
 
@@ -250,7 +198,7 @@ OpenRouter는 LiteLLM provider로 호출됩니다.
 |---|---|---|
 | **연결/키 확인** | `cd tau2-bench`<br>`tau2 check-data` | 데이터 경로/환경 설정이 정상인지 |
 | **초고속 1개 테스트(telecom)** | `cd tau2-bench`<br>`export OPENROUTER_API_KEY="YOUR_KEY"`<br>`tau2 run --domain telecom --agent-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --user-llm openrouter/mistralai/mistral-small-3.2-24b-instruct --num-trials 1 --num-tasks 1 --max-concurrency 1 --log-level ERROR` | 1개 태스크에서 **툴 호출이 실제로 나오는지**, 통신이 되는지 |
-| **엑셀 리포트 생성** | `cd tau2-bench`<br>`python3 generate_excel_report.py` | 요청/GT/모델 응답/FAIL 원인을 리포트로 확인 |
+| **엑셀 리포트 생성(latest 고정)** | `cd tau2-bench`<br>`python3 generate_reports.py --results-root results/latest --input-dir results/latest/simulations --prune` | results/latest 아래로 전체요약+모델별 엑셀 생성 |
 | **5개 모델 × 3도메인 전체 평가** | `cd tau2-bench`<br>`./run_evaluation.sh` | 전체 Pass^k/도메인 성능 비교 |
 | **450회 Quick(3도메인×30태스크×5모델×1trial) + 최신 리포트 생성** | `cd tau2-bench`<br>`./run_quick_450.sh` | 비용 절감용 1차 스크리닝(P@1 중심) |
 | **OpenRouter 기본 라우팅 사용** | `cd tau2-bench`<br>`./run_evaluation.sh` | OpenRouter 기본 라우팅으로 실행 |
@@ -286,7 +234,7 @@ tau2 run \
   --max-concurrency 3 \
   --log-level ERROR
 
-python3 generate_excel_report.py
+python3 generate_reports.py --results-root results/latest --input-dir results/latest/simulations --prune
 ```
 
 ## Full 평가(5개 모델 자동 실행)
@@ -309,11 +257,17 @@ DELAY_SEC=1 ./run_evaluation.sh
 
 ## 엑셀 리포트(요약)
 
-`tau2-bench/generate_excel_report.py`는 결과 JSON을 읽어 `tau2_evaluation_report.xlsx`를 생성합니다.
+리포트는 항상 `results/latest/` 아래로 생성합니다(덮어쓰기).
 
-- **요약**: 모델 랭킹 + 모델×도메인 Pass^k 매트릭스
-- **런**: Run 단위(요청/GT/툴/최종응답/결과/근거). 원본(JSON/툴응답)은 숨김 컬럼을 펼쳐 확인
-- **턴**: 턴 단위 원문(디버깅용). ToolCalls/ToolResult는 기본 숨김
+- **전체 요약**: `tau2-bench/results/latest/전체_요약/TAU2_전체요약_latest.xlsx`
+- **모델별**: `tau2-bench/results/latest/모델별/<모델라벨>/TAU2_<모델라벨>_latest.xlsx`
+
+엑셀은 기본으로 **2개 시트만 표시**됩니다.
+
+- **요약**: 모델 랭킹 + 모델×도메인 P@k 매트릭스(quick이면 P@1 중심)
+- **런**: `Result, Model, Domain, TaskIdx, Reward, Query, 정답(GT), 모델 응답, Error Type, Error Info`
+
+중간 집계는 숨김 시트(`Task별_집계`)에서 엑셀 수식으로 계산합니다.
 
 ## OpenRouter로 평가할 때 자주 겪는 이슈
 
