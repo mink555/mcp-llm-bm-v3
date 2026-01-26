@@ -1286,51 +1286,51 @@ def create_turns_sheet(wb, turns_rows, styles):
                 cell.alignment = styles["data"]["align"]
         ws.row_dimensions[r].height = 54
 
-    # ===== TOOL_CALL / TOOL_RESULT 행 강조(조건부 서식) =====
+    # ===== PASS/FAIL 표시(전용 컬럼만, 최우선) =====
     first_data_row = header_row + 1
     last_data_row = ws.max_row
-    # ToolCalls(JSON 원문) 컬럼은 숨김이므로, 보이는 범위까지만
-    vis_range = f"A{first_data_row}:M{last_data_row}"
-    ws.conditional_formatting.add(
-        vis_range,
-        FormulaRule(
-            formula=[f'$I{first_data_row}="TOOL_CALL"'],
-            fill=styles["tool_call_row"]["fill"],
-            # TOOL_CALL 행은 이 색이 최우선(정신없지 않게 PASS/FAIL 컬럼 색 등 덮어쓰기)
-            stopIfTrue=True,
-        ),
-    )
-    ws.conditional_formatting.add(
-        vis_range,
-        FormulaRule(
-            formula=[f'$I{first_data_row}="TOOL_RESULT"'],
-            fill=styles["tool_result_row"]["fill"],
-            # TOOL_RESULT 행도 최우선
-            stopIfTrue=True,
-        ),
-    )
-
-    # ===== PASS/FAIL 표시(전용 컬럼만 은은하게) =====
     pass_col_range = f"F{first_data_row}:F{last_data_row}"
     ws.conditional_formatting.add(
         pass_col_range,
         FormulaRule(
-            # TOOL_* 행은 이미 행 전체 색으로 강조되므로 TEXT 행에서만 PASS/FAIL 색을 보여준다.
-            formula=[f'=AND($F{first_data_row}="PASS",$I{first_data_row}<>"TOOL_CALL",$I{first_data_row}<>"TOOL_RESULT")'],
+            formula=[f'$F{first_data_row}="PASS"'],
             fill=styles["pass"]["fill"],
             font=styles["pass"]["font"],
-            stopIfTrue=False,
+            stopIfTrue=True,
         ),
     )
     ws.conditional_formatting.add(
         pass_col_range,
         FormulaRule(
-            formula=[f'=AND($F{first_data_row}="FAIL",$I{first_data_row}<>"TOOL_CALL",$I{first_data_row}<>"TOOL_RESULT")'],
+            formula=[f'$F{first_data_row}="FAIL"'],
             fill=styles["fail"]["fill"],
             font=styles["fail"]["font"],
-            stopIfTrue=False,
+            stopIfTrue=True,
         ),
     )
+
+    # ===== TOOL_CALL / TOOL_RESULT 행 강조(조건부 서식) =====
+    # PASS? 컬럼(F)은 PASS/FAIL이 최우선이어야 하므로, TOOL 강조 범위에서 제외한다.
+    # ToolCalls(JSON 원문) 컬럼은 숨김이므로, 보이는 범위까지만(A~M, 단 F 제외)
+    vis_left = f"A{first_data_row}:E{last_data_row}"
+    vis_right = f"G{first_data_row}:M{last_data_row}"
+    for rng in [vis_left, vis_right]:
+        ws.conditional_formatting.add(
+            rng,
+            FormulaRule(
+                formula=[f'$I{first_data_row}="TOOL_CALL"'],
+                fill=styles["tool_call_row"]["fill"],
+                stopIfTrue=False,
+            ),
+        )
+        ws.conditional_formatting.add(
+            rng,
+            FormulaRule(
+                formula=[f'$I{first_data_row}="TOOL_RESULT"'],
+                fill=styles["tool_result_row"]["fill"],
+                stopIfTrue=False,
+            ),
+        )
 
     ws.freeze_panes = f"A{header_row+1}"
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{ws.max_row}"
