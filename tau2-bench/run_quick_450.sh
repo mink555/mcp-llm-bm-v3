@@ -50,6 +50,9 @@ TEMP="${TEMP:-0.0}"
 MAX_TOKENS="${MAX_TOKENS:-2048}"
 MAX_STEPS="${MAX_STEPS:-200}"
 MAX_ERRORS="${MAX_ERRORS:-10}"
+MAX_ERRORS_SINGLE="${MAX_ERRORS_SINGLE:-3}"
+RETRIES_PER_TASK="${RETRIES_PER_TASK:-4}"
+SINGLE_MAX_CONCURRENCY="${SINGLE_MAX_CONCURRENCY:-1}"
 DELAY_SEC="${DELAY_SEC:-1}"
 # FORCE=1이면 기존 결과를 삭제하고 처음부터 다시 실행
 FORCE="${FORCE:-0}"
@@ -144,6 +147,7 @@ run_one() {
   user_args="$agent_args"
 
   local out_json="data/simulations/${save_to}.json"
+  local expected="${NUM_TASKS}"
   if [ "$FORCE" != "1" ] && is_complete "$out_json"; then
     echo "  [SKIP] already complete: $out_json"
     # 결과 폴더에 복사 보장
@@ -151,28 +155,109 @@ run_one() {
     return 0
   fi
 
-  echo "  - domain=${domain} task_set=${task_set} model=${model##*/} tasks=${NUM_TASKS} trials=${NUM_TRIALS}"
-  if ! tau2 run \
-    --domain "$domain" \
-    --task-set-name "$task_set" \
-    --task-ids "${task_ids[@]}" \
-    --num-tasks "$NUM_TASKS" \
-    --num-trials "$NUM_TRIALS" \
-    --max-steps "$MAX_STEPS" \
-    --max-errors "$MAX_ERRORS" \
-    --max-concurrency "$MAX_CONCURRENCY" \
-    --agent-llm "$model" \
-    --agent-llm-args "$agent_args" \
-    --user-llm "$model" \
-    --user-llm-args "$user_args" \
-    --save-to "$save_to" \
-    --log-level ERROR; then
-    echo "  [WARN] tau2 run failed (domain=$domain model=$model). 계속 진행"
+  # 1) 먼저 "일괄 실행"으로 최대한 채워보기(파일이 없을 때만)
+  if [ ! -f "$out_json" ]; then
+    echo "  - domain=${domain} task_set=${task_set} model=${model##*/} tasks=${NUM_TASKS} trials=${NUM_TRIALS}"
+    if ! tau2 run \
+      --domain "$domain" \
+      --task-set-name "$task_set" \
+      --task-ids "${task_ids[@]}" \
+      --num-tasks "$NUM_TASKS" \
+      --num-trials "$NUM_TRIALS" \
+      --max-steps "$MAX_STEPS" \
+      --max-errors "$MAX_ERRORS" \
+      --max-concurrency "$MAX_CONCURRENCY" \
+      --agent-llm "$model" \
+      --agent-llm-args "$agent_args" \
+      --user-llm "$model" \
+      --user-llm-args "$user_args" \
+      --save-to "$save_to" \
+      --log-level ERROR; then
+      echo "  [WARN] tau2 run failed (domain=$domain model=$model). 누락분은 개별 재시도로 채웁니다."
+    fi
   fi
 
   if [ -f "$out_json" ]; then
     cp -f "$out_json" "results/latest/simulations/"
     echo "    -> saved: results/latest/simulations/$(basename "$out_json")"
+  fi
+
+  # 2) 누락 TaskID만 1개씩 재시도해서 "완주" 보장
+  # expected list -> temp file
+  local exp_file
+  exp_file="$(mktemp)"
+  printf "%s\n" "${task_ids[@]}" > "$exp_file"
+  # compute missing via python (based on existing simulations.task_id)
+  local missing
+  missing="$(python3 - <<PY
+import json, sys
+from pathlib import Path
+out_json=Path("$out_json")
+exp=Path("$exp_file").read_text(encoding="utf-8").splitlines()
+exp=[x.strip() for x in exp if x.strip()]
+done=set()
+if out_json.exists():
+    try:
+        data=json.loads(out_json.read_text(encoding="utf-8"))
+        for s in (data.get("simulations") or []):
+            if isinstance(s, dict) and s.get("task_id"):
+                done.add(str(s["task_id"]))
+    except Exception:
+        pass
+missing=[x for x in exp if x not in done]
+print("\\n".join(missing))
+PY
+)"
+  rm -f "$exp_file" 2>/dev/null || true
+  if [ -n "$missing" ]; then
+    local missing_count
+    missing_count="$(echo "$missing" | wc -l | tr -d ' ')"
+    echo "  [FILL] missing tasks=${missing_count} -> 개별 실행/병합로 채움"
+    while IFS= read -r tid; do
+      [ -z "$tid" ] && continue
+      local ok=0
+      local attempt=1
+      while [ "$attempt" -le "$RETRIES_PER_TASK" ]; do
+        # task_id가 길 수 있어 파일명은 해시 대신 안전한 단축
+        local tid_s
+        tid_s="$(echo "$tid" | sed 's/[^A-Za-z0-9]/_/g' | cut -c1-80)"
+        local tmp_save="${save_to}__fill_${tid_s}__a${attempt}"
+        local tmp_json="data/simulations/${tmp_save}.json"
+        echo "    - [TRY] (${attempt}/${RETRIES_PER_TASK}) task_id=${tid}"
+        if tau2 run \
+          --domain "$domain" \
+          --task-set-name "$task_set" \
+          --task-ids "$tid" \
+          --num-tasks 1 \
+          --num-trials "$NUM_TRIALS" \
+          --max-steps "$MAX_STEPS" \
+          --max-errors "$MAX_ERRORS_SINGLE" \
+          --max-concurrency "$SINGLE_MAX_CONCURRENCY" \
+          --agent-llm "$model" \
+          --agent-llm-args "$agent_args" \
+          --user-llm "$model" \
+          --user-llm-args "$user_args" \
+          --save-to "$tmp_save" \
+          --log-level ERROR; then
+          :
+        fi
+        # tmp_json이 생성되고 simulations가 1개 이상이면 병합
+        if [ -f "$tmp_json" ]; then
+          python3 merge_simulations.py --base "$out_json" --add "$tmp_json" --out "$out_json" || true
+          rm -f "$tmp_json" 2>/dev/null || true
+          cp -f "$out_json" "results/latest/simulations/" 2>/dev/null || true
+          ok=1
+          break
+        fi
+        attempt=$((attempt+1))
+        if [ "$DELAY_SEC" != "0" ]; then
+          sleep "$DELAY_SEC"
+        fi
+      done
+      if [ "$ok" -ne 1 ]; then
+        echo "    [WARN] task_id=${tid} 를 ${RETRIES_PER_TASK}회 시도했지만 실패(나중에 다시 시도 가능)"
+      fi
+    done <<< "$missing"
   fi
 
   if [ "$DELAY_SEC" != "0" ]; then
