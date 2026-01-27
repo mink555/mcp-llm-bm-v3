@@ -1178,30 +1178,35 @@ def create_runs_sheet(wb, runs, styles):
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     ws.row_dimensions[3].height = 28
 
-    # 요청한 형태로 간결화(집계는 이 시트 기준으로 수행)
+    # 판정 최소셋(직관용): PASS/FAIL을 이해하는 데 필요한 컬럼만 기본 표시
+    # IMPORTANT: Task별_집계가 COUNTIFS로 참조하는 고정 컬럼은 유지해야 함
+    #  - A=Result, B=Model, C=Domain, D=TaskIdx
     headers = [
-        "Result",        # A (PASS/FAIL)
-        "Model",         # B
-        "Domain",        # C
-        "TaskIdx",       # D
-        "Reward",        # E
-        "Query",         # F
-        "정답(GT)",      # G
-        "모델 응답",     # H
-        "Error Type",    # I
-        "Error Info",    # J
+        "Result",            # A (PASS/FAIL)  ← 집계 기준
+        "Model",             # B              ← 집계 기준
+        "Domain",            # C              ← 집계 기준
+        "TaskIdx",           # D              ← 집계 기준
+        "Reward",            # E
+        "Termination",       # F
+        "RewardBasis",       # G
+        "GT 필수툴",         # H (RequiredTools 요약)
+        "GT Actions (상세)", # I (name + arguments)
+        "CalledTools",       # J
+        "MissingTools",      # K
+        "RB_DB",             # L
+        "RB_COMMUNICATE",    # M
+        "RB_ACTION",         # N
+        "RB_ENV_ASSERTION",  # O
     ]
     hidden_headers = [
         "RunID",
         "Trial",
-        "Termination",
-        "RewardBasis",
-        "RB_ENV_ASSERTION", "RB_ACTION", "RB_DB", "RB_COMMUNICATE", "RB_NL_ASSERTION",
-        "RequiredTools(GT)", "CalledTools(Model)", "MissingTools",
-        "FailedEnvAssertions", "ActionMismatches",
+        "RB_NL_ASSERTION",
+        "FailedEnvAssertions",
+        "ActionMismatches",
         "UserFirstUtterance(원문)",
         "UserScenario(원문 JSON)",
-        "GT(원문 JSON)",
+        "GT(원문 JSON)",         # 원문
         "ToolCalls(원문)",
         "ToolResults(원문)",
         "ModelFinal(원문)",
@@ -1250,11 +1255,12 @@ def create_runs_sheet(wb, runs, styles):
         # 노출 컬럼(요약)
         result = "PASS" if run.get("Pass")==1 else "FAIL"
         task_idx = run.get("TaskIdx") or ""
-        query = _truncate_for_excel(first_user_raw or _summarize_request(req_raw), 520)
-        gt_short = _truncate_for_excel(_summarize_gt(gt_raw), 520)
-        model_resp = _truncate_for_excel(agent_final_raw, 520)
-        err_type = "" if result == "PASS" else (fail_tag or term or "FAIL")
-        err_info = "" if result == "PASS" else _truncate_for_excel(why_one + ("\n" + why_detail if why_detail else ""), 520)
+        reward_basis_raw = run.get("RewardBasisRaw", "")
+        # GT/툴 요약
+        gt_required_tools = ", ".join(required_tools) if required_tools else ""
+        gt_actions_detail_str = run.get("GTActionsDetail", "(없음)")
+        called_tools_str = ", ".join(called_tools) if called_tools else ""
+        missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
 
         row = [
             result,
@@ -1262,24 +1268,20 @@ def create_runs_sheet(wb, runs, styles):
             run.get("Domain",""),
             task_idx,
             run.get("Reward",0.0),
-            query,
-            gt_short,
-            model_resp,
-            err_type,
-            err_info,
+            term,
+            reward_basis_raw,
+            gt_required_tools,
+            gt_actions_detail_str,  # GT Actions (상세)
+            called_tools_str,
+            missing_tools_str,
+            run.get("RB_DB"),
+            run.get("RB_COMMUNICATE"),
+            run.get("RB_ACTION"),
+            run.get("RB_ENV_ASSERTION"),
             # hidden(집계/디버깅)
             run.get("RunID",""),
             run.get("Trial",0),
-            term,
-            run.get("RewardBasisRaw",""),
-            run.get("RB_ENV_ASSERTION"),
-            run.get("RB_ACTION"),
-            run.get("RB_DB"),
-            run.get("RB_COMMUNICATE"),
             run.get("RB_NL_ASSERTION"),
-            ", ".join(required_tools) if required_tools else "",
-            ", ".join(called_tools) if called_tools else "",
-            ", ".join(missing_tools) if missing_tools else "",
             "\n".join(failed_env_assertions) if failed_env_assertions else "",
             "\n".join(action_mismatches) if action_mismatches else "",
             first_user_raw,
@@ -1300,7 +1302,7 @@ def create_runs_sheet(wb, runs, styles):
         for col_idx in range(1, len(headers) + len(hidden_headers) + 1):
             cell = ws.cell(r, col_idx)
             cell.border = styles["data"]["border"]
-            if col_idx in [1,4,5]:
+            if col_idx in [1,4,5,6]:
                 cell.alignment = styles["data_center"]["align"]
             else:
                 cell.alignment = styles["data"]["align"]
@@ -1310,7 +1312,7 @@ def create_runs_sheet(wb, runs, styles):
             rc.fill = styles["pass"]["fill"]; rc.font = styles["pass"]["font"]
         else:
             rc.fill = styles["fail"]["fill"]; rc.font = styles["fail"]["font"]
-        ws.row_dimensions[r].height = 66
+        ws.row_dimensions[r].height = 48
 
     # ===== PASS/FAIL 행 강조(과하지 않게, 연한 배경) =====
     first_data_row = hrow + 1
@@ -1336,8 +1338,8 @@ def create_runs_sheet(wb, runs, styles):
             stopIfTrue=False,
         ),
     )
-    # FAIL이면 Error Type/Info를 조금 더 눈에 띄게
-    fail_focus_range = f"I{first_data_row}:I{last_data_row}"
+    # FAIL이면 MissingTools/Reward 축을 조금 더 눈에 띄게
+    fail_focus_range = f"K{first_data_row}:K{last_data_row}"  # MissingTools
     ws.conditional_formatting.add(
         fail_focus_range,
         FormulaRule(
@@ -1346,7 +1348,7 @@ def create_runs_sheet(wb, runs, styles):
             stopIfTrue=False,
         ),
     )
-    fail_focus_range2 = f"J{first_data_row}:J{last_data_row}"
+    fail_focus_range2 = f"L{first_data_row}:O{last_data_row}"  # RB_*
     ws.conditional_formatting.add(
         fail_focus_range2,
         FormulaRule(
@@ -1361,16 +1363,21 @@ def create_runs_sheet(wb, runs, styles):
 
     # Column widths (핵심만 보이게)
     widths = {
-        "A":8,   # Result
-        "B":26,  # Model
-        "C":10,  # Domain
-        "D":7,   # TaskIdx
-        "E":8,   # Reward
-        "F":54,  # Query
-        "G":54,  # GT
-        "H":54,  # Model response
-        "I":18,  # Error Type
-        "J":54,  # Error Info
+        "A":8,    # Result
+        "B":26,   # Model
+        "C":10,   # Domain
+        "D":7,    # TaskIdx
+        "E":8,    # Reward
+        "F":12,   # Termination
+        "G":18,   # RewardBasis
+        "H":22,   # GT 필수툴
+        "I":35,   # GT Actions (상세)
+        "J":24,   # CalledTools
+        "K":22,   # MissingTools
+        "L":10,   # RB_DB
+        "M":14,   # RB_COMMUNICATE
+        "N":10,   # RB_ACTION
+        "O":14,   # RB_ENV_ASSERTION
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2206,16 +2213,27 @@ def generate_report(
             user_request_raw = user_scenario_raw or first_user
             gt_raw = meta.get("gt_raw", "")
             gt_summary = gt_map.get((domain, str(task_id)), "N/A")
-            # 필수 툴 리스트(GT)
+            # 필수 툴 리스트(GT) + GT Actions 상세 정보
             required_tools: list[str] = []
+            gt_actions_detail: list[str] = []
             try:
                 gt_obj = json.loads(gt_raw) if gt_raw else {}
                 if isinstance(gt_obj, dict):
                     for a in (gt_obj.get("actions") or []):
                         if isinstance(a, dict) and a.get("name"):
-                            required_tools.append(a["name"])
+                            name = a["name"]
+                            required_tools.append(name)
+                            # Arguments를 보기 쉽게 포맷팅
+                            args = a.get("arguments", {})
+                            if args:
+                                args_str = ", ".join([f"{k}={v}" for k, v in args.items()])
+                                gt_actions_detail.append(f"{name}({args_str})")
+                            else:
+                                gt_actions_detail.append(f"{name}()")
             except Exception:
                 required_tools = []
+                gt_actions_detail = []
+            gt_actions_detail_str = "\n".join(gt_actions_detail) if gt_actions_detail else "(없음)"
             called_tools = sorted({n for n in tool_names if n})
             missing_tools = sorted(set(required_tools) - set(called_tools))
 
@@ -2260,6 +2278,7 @@ def generate_report(
                     "UserFirstUtterance": first_user,
                     "GTRaw": gt_raw,
                     "GTSummary": gt_summary,
+                    "GTActionsDetail": gt_actions_detail_str,
                     "AgentFinalRaw": agent_final,
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,

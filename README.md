@@ -265,9 +265,34 @@ DELAY_SEC=1 ./run_evaluation.sh
 엑셀은 기본으로 **2개 시트만 표시**됩니다.
 
 - **요약**: 모델 랭킹 + 모델×도메인 P@k 매트릭스(quick이면 P@1 중심)
-- **런**: `Result, Model, Domain, TaskIdx, Reward, Query, 정답(GT), 모델 응답, Error Type, Error Info`
+- **런**: 각 실행(run)의 상세 정보 및 PASS/FAIL 근거
 
 중간 집계는 숨김 시트(`Task별_집계`)에서 엑셀 수식으로 계산합니다.
+
+### `런` 시트 주요 컬럼 설명
+
+| 컬럼 | 의미 | PASS/FAIL 분석 포인트 |
+|---|---|---|
+| **Result** | 최종 판정(PASS/FAIL) | Reward==1이면 보통 PASS |
+| **Model** | 모델 라벨 | 모델별 성능 비교 |
+| **Domain** | 도메인(retail/airline/telecom) | 도메인별 강약점 파악 |
+| **TaskIdx** | 태스크셋 내 순번(1~30) | 같은 Task 재확인 시 사용 |
+| **Reward** | 최종 점수(0~1) | 1이면 성공 조건 충족 |
+| **Termination** | 종료 사유(user_stop 등) | user_stop이어도 PASS 가능 |
+| **RewardBasis** | 채점에 포함된 축 목록 | 여기 적힌 축의 RB_*가 핵심 |
+| **GT 필수툴** | GT가 요구한 필수 tool 이름 | 이 툴들을 호출했는지 확인 |
+| **GT Actions (상세)** | GT 필수 툴 + arguments | **DB 정답 상태 만드는 레시피**<br/>`get_user_details(user_id=raj_7340)` |
+| **CalledTools** | 모델이 실제 호출한 tool 목록 | GT 필수툴이 포함되는지 확인 |
+| **MissingTools** | GT 필수툴 중 누락된 tool | 값이 있으면 거의 FAIL 원인 |
+| **RB_DB** | DB/상태 체크 축 점수(0/1) | RewardBasis에 DB가 있으면 필수 |
+| **RB_COMMUNICATE** | 커뮤니케이션 체크 축 점수 | 0이면 안내/요건 미충족 |
+| **RB_ACTION** | 액션(필수 행동/툴) 축 점수 | 0이면 필수 액션/절차 미충족 |
+| **RB_ENV_ASSERTION** | 환경 assertion 축 점수 | 0이면 env 조건 불만족(telecom) |
+
+**핵심 이해 포인트:**
+- **GT Actions가 비어있으면** → "DB 안 바꾸는 게 정답" (적절한 이관 등)
+- **RewardBasis에 없는 축은 채점 안 됨** → `ActionMismatches` 있어도 `ACTION`이 basis에 없으면 무시
+- **RB_DB는 "Golden DB 해시 vs 모델 DB 해시" 비교** → GT Actions를 실행한 결과와 모델 실행 결과의 DB 상태가 일치하는지
 
 ## OpenRouter로 평가할 때 자주 겪는 이슈
 
