@@ -1447,18 +1447,25 @@ def create_guide_sheet(wb, styles):
     row_idx += 1
     
     example1 = [
+        ["🟢 PASS 케이스", ""],
         ["상황", "고객이 항공편 예약을 변경하고 싶어함. 변경 후 확인 정보를 안내해야 함."],
         ["GT 필수툴", "get_reservation_details, update_reservation"],
-        ["모델 호출", "get_reservation_details, update_reservation, transfer_to_human_agents (여기서 transfer는 불필요했지만 무시됨)"],
+        ["모델 호출", "get_reservation_details, update_reservation ✅ (GT와 동일!)"],
         ["", ""],
         ["평가 결과", ""],
-        ["  RB_DB", "1.0 (DB에 올바르게 저장됨)"],
-        ["  RB_COMMUNICATE", "1.0 (변경 내용을 안내함)"],
+        ["  RB_DB", "1.0 (DB에 올바르게 저장됨 ✅)"],
+        ["  RB_COMMUNICATE", "1.0 (변경 내용을 안내함 ✅)"],
         ["  RB_ACTION", "None (채점 안 함, 'X'니까!)"],
         ["  RB_ENV_ASSERTION", "None (채점 안 함)"],
         ["", ""],
         ["최종 점수", "Reward = 1.0 × 1.0 = 1.0 → PASS ✅"],
-        ["핵심", "transfer_to_human_agents를 불필요하게 호출했지만, ACTION='X'라서 상관없음!"],
+        ["핵심", "GT 필수툴을 정확히 호출 → DB가 Golden과 동일 → PASS!"],
+        ["", ""],
+        ["🔴 FAIL 케이스 (비교)", ""],
+        ["모델 호출 (잘못)", "transfer_to_human_agents만 호출 ❌ (GT 필수툴 누락!)"],
+        ["평가 결과", "RB_DB=0.0 (DB가 Golden과 다름!), RB_COMMUNICATE=0.5"],
+        ["최종 점수", "Reward = 0.0 × 0.5 = 0.0 → FAIL ❌"],
+        ["핵심", "필수툴 안 호출 → DB 변경 안됨 → Golden DB와 다름 → FAIL!"],
     ]
     
     for r in example1:
@@ -1487,10 +1494,10 @@ def create_guide_sheet(wb, styles):
     row_idx += 1
     
     example2 = [
+        ["🟢 PASS 케이스", ""],
         ["상황", "사용자가 '인터넷이 안 돼요'라고 함. 모바일 데이터를 켜야 함."],
-        ["GT 필수툴", "turn_on_mobile_data"],
         ["GT env_assertions", "assert_mobile_data_status(expected_status=True)"],
-        ["모델 호출", "get_mobile_data_status, turn_on_mobile_data"],
+        ["모델 호출", "turn_on_mobile_data ✅"],
         ["", ""],
         ["평가 결과", ""],
         ["  RB_DB", "None (채점 안 함, 'X'니까!)"],
@@ -1499,7 +1506,13 @@ def create_guide_sheet(wb, styles):
         ["  RB_ENV_ASSERTION", "1.0 (모바일 데이터가 켜져 있음 확인 ✅)"],
         ["", ""],
         ["최종 점수", "Reward = 1.0 → PASS ✅"],
-        ["핵심", "DB나 안내는 무시하고, 오직 '최종 시스템 설정'만 확인!"],
+        ["핵심", "최종 시스템 설정(mobile_data=ON)만 맞으면 PASS!"],
+        ["", ""],
+        ["🔴 FAIL 케이스 (비교)", ""],
+        ["모델 호출 (잘못)", "아무것도 안 함 ❌ (또는 turn_off_mobile_data 호출)"],
+        ["평가 결과", "RB_ENV_ASSERTION=0.0 (mobile_data=OFF로 확인 ❌)"],
+        ["최종 점수", "Reward = 0.0 → FAIL ❌"],
+        ["핵심", "최종 설정이 GT 기대값과 다름 → FAIL!"],
     ]
     
     for r in example2:
