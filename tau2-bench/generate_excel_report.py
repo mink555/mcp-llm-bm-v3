@@ -2800,13 +2800,17 @@ def generate_report(
                     if msg.get("role") == "assistant":
                         msg_content = msg.get("content", "")
                         if msg_content:
-                            # GT Communicate 값이 하나라도 포함되어 있는지 체크 (evaluator와 동일한 로직)
+                            # 이 메시지에 포함된 GT 값들 찾기
+                            found_values = []
                             for info_str in gt_communicate_info:
                                 if info_str.lower() in msg_content.lower().replace(",", ""):
-                                    # 이 메시지에 GT 값이 포함됨
-                                    preview = msg_content[:200] + "..." if len(msg_content) > 200 else msg_content
-                                    communicate_related_messages_list.append(f"[포함: '{info_str}'] {preview}")
-                                    break  # 한 메시지에서 여러 값을 찾더라도 한 번만 추가
+                                    found_values.append(info_str)
+                            
+                            # 포함된 값이 있으면 메시지 추가
+                            if found_values:
+                                preview = msg_content[:200] + "..." if len(msg_content) > 200 else msg_content
+                                values_str = ", ".join([f"'{v}'" for v in found_values])
+                                communicate_related_messages_list.append(f"[포함: {values_str}] {preview}")
             communicate_related_messages_str = "\n\n".join(communicate_related_messages_list) if communicate_related_messages_list else ""
 
             # 실패 근거(필수 액션 미충족 등) 계산
