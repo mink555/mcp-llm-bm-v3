@@ -117,6 +117,7 @@ def _fmt_kv_call(name: str, args: dict | None) -> str:
 
 def _extract_failed_env_assertions(reward_info: dict) -> list[str]:
     out: list[str] = []
+    # env_assertions 리스트에서 met=False인 항목 추출
     for item in (reward_info or {}).get("env_assertions") or []:
         if not isinstance(item, dict):
             continue
@@ -1154,6 +1155,191 @@ def create_summary_sheet(wb, models_mapping, domains, styles, *, max_trials_seen
         pass
 
 
+def create_guide_sheet(wb, styles):
+    """
+    평가 가이드 시트: TAU2 평가 방법, 용어, 흐름도 등 설명
+    """
+    ws = wb.create_sheet("📖 평가 가이드", 0)  # 맨 앞에 배치
+    
+    row_idx = 1
+    
+    # ===== 제목 =====
+    ws.append(["TAU2-Bench 평가 가이드"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=16, bold=True, color="2F5496")
+    ws[f"A{row_idx}"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[row_idx].height = 30
+    row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 1. 평가 흐름 =====
+    ws.append(["■ 평가 흐름 (5단계)"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    row_idx += 1
+    
+    flow_steps = [
+        ["단계", "설명", "엑셀 컬럼"],
+        ["1. 태스크 시작", "어떤 문제인가?", "Domain, TaskIdx"],
+        ["2. 모델 실행", "모델이 대화하고 툴 호출", "CalledTools"],
+        ["3. 정답(GT)과 비교", "Golden Environment와 비교", "GT Actions (상세)"],
+        ["4. 점수 계산", "각 축(Reward Basis)별로 채점", "RB_DB, RB_COMMUNICATE, RB_ACTION, RB_ENV_ASSERTION"],
+        ["5. PASS/FAIL 결정", "Reward = (각 축 점수) 곱하기", "Result, Reward"],
+    ]
+    
+    for r in flow_steps:
+        ws.append(r)
+        if r == flow_steps[0]:  # 헤더
+            for c in ws[row_idx]:
+                c.font = styles["header"]["font"]
+                c.fill = styles["header"]["fill"]
+                c.alignment = styles["header"]["align"]
+                c.border = styles["data"]["border"]
+        else:
+            for c in ws[row_idx]:
+                c.border = styles["data"]["border"]
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 2. 핵심 개념 =====
+    ws.append(["■ 핵심 개념 (꼭 알아야 할 3가지)"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    row_idx += 1
+    
+    concepts = [
+        ["개념", "설명", "예시"],
+        ["Golden Environment", "'정답 상태'를 만드는 환경. GT Actions를 실행해서 생성.", "GT Actions: get_user(id=raj_7340) → Golden DB Hash: abc123"],
+        ["RB_DB", "모델 DB와 Golden DB의 해시 비교. 일치=1점, 불일치=0점.", "Golden: abc123, Model: xyz789 → 불일치 → 0점"],
+        ["RewardBasis", "채점 범위. 여기 포함된 축만 점수에 반영됨!", "[DB, COMMUNICATE] → RB_ACTION은 무시"],
+    ]
+    
+    for r in concepts:
+        ws.append(r)
+        if r == concepts[0]:  # 헤더
+            for c in ws[row_idx]:
+                c.font = styles["header"]["font"]
+                c.fill = styles["header"]["fill"]
+                c.alignment = styles["header"]["align"]
+                c.border = styles["data"]["border"]
+        else:
+            for c in ws[row_idx]:
+                c.border = styles["data"]["border"]
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 3. 평가 축 설명 =====
+    ws.append(["■ 평가 축 (RewardBasis) - 각 축이 무엇을 체크하는가"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    row_idx += 1
+    
+    axes = [
+        ["축", "체크 내용", "1점 조건", "0점 조건", "주 사용 도메인"],
+        ["DB", "데이터베이스 상태 (Golden DB vs 모델 DB)", "DB 해시 일치", "DB 해시 불일치", "airline, retail"],
+        ["COMMUNICATE", "사용자 안내 (필수 정보 전달)", "필수 정보 모두 안내", "필수 정보 누락", "airline, retail"],
+        ["ACTION", "필수 액션 수행 (GT actions 비교)", "모든 액션 수행", "액션 누락/틀림", "드물게 사용"],
+        ["ENV_ASSERTION", "시스템 설정 (data_mode, roaming 등)", "모든 조건 만족", "조건 불만족", "telecom"],
+    ]
+    
+    for r in axes:
+        ws.append(r)
+        if r == axes[0]:  # 헤더
+            for c in ws[row_idx]:
+                c.font = styles["header"]["font"]
+                c.fill = styles["header"]["fill"]
+                c.alignment = styles["header"]["align"]
+                c.border = styles["data"]["border"]
+        else:
+            for c in ws[row_idx]:
+                c.border = styles["data"]["border"]
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 4. 실전 예시 =====
+    ws.append(["■ 실전 예시 - 엑셀 한 줄 읽는 법"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    row_idx += 1
+    
+    examples = [
+        ["컬럼", "값", "해석"],
+        ["Result", "FAIL", "❌ 실패"],
+        ["Reward", "0.0", "0점 = 불합격"],
+        ["RewardBasis", "[DB, COMMUNICATE]", "DB와 안내를 채점함"],
+        ["GT Actions (상세)", "get_user_details(user_id=raj_7340)\\nget_reservation_details(id=Q69X3R)", "✅ 정답: 이 2개 툴을 호출해야 함"],
+        ["CalledTools", "get_user_details, transfer_to_human_agents", "❌ 모델: 1개만 호출"],
+        ["MissingTools", "get_reservation_details", "❌ 누락된 툴 발견! = FAIL 원인"],
+        ["RB_DB", "0.0", "❌ DB가 Golden과 다름"],
+        ["RB_COMMUNICATE", "1.0", "✅ 안내는 OK"],
+        ["결론", "", "→ get_reservation_details를 호출 안 해서 FAIL"],
+    ]
+    
+    for r in examples:
+        ws.append(r)
+        if r == examples[0]:  # 헤더
+            for c in ws[row_idx]:
+                c.font = styles["header"]["font"]
+                c.fill = styles["header"]["fill"]
+                c.alignment = styles["header"]["align"]
+                c.border = styles["data"]["border"]
+        else:
+            for c in ws[row_idx]:
+                c.border = styles["data"]["border"]
+                c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 5. 3줄 요약 =====
+    ws.append(["■ 3줄 요약 (암기용)"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="00B050")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    row_idx += 1
+    
+    summary = [
+        ["1. 'GT Actions (상세)' = 정답 레시피 (이걸 따라하면 정답)"],
+        ["2. 'RB_DB' = Golden DB vs 모델 DB 비교 (같으면 1점, 다르면 0점)"],
+        ["3. 'RewardBasis'에 없는 축은 무시 (ActionMismatches 있어도 ACTION이 basis에 없으면 OK)"],
+    ]
+    
+    for r in summary:
+        ws.append(r)
+        ws.merge_cells(f"A{row_idx}:F{row_idx}")
+        ws[f"A{row_idx}"].font = Font(size=12, bold=True)
+        ws[f"A{row_idx}"].fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+        ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws.row_dimensions[row_idx].height = 25
+        row_idx += 1
+    
+    # Column widths
+    ws.column_dimensions["A"].width = 25
+    ws.column_dimensions["B"].width = 35
+    ws.column_dimensions["C"].width = 35
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 20
+    
+    return ws
+
+
 def create_runs_sheet(wb, runs, styles):
     """
     런 시트(간결): 케이스_요약 + 런_원본을 합친 형태.
@@ -1178,25 +1364,37 @@ def create_runs_sheet(wb, runs, styles):
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     ws.row_dimensions[3].height = 28
 
-    # 판정 최소셋(직관용): PASS/FAIL을 이해하는 데 필요한 컬럼만 기본 표시
+    # 판정 최소셋(직관용): 논리적 흐름에 맞게 재배치
+    # 흐름: 결과 → 점수 → 정답(GT) → 모델 행동 → 세부 점수 → 종료
     # IMPORTANT: Task별_집계가 COUNTIFS로 참조하는 고정 컬럼은 유지해야 함
     #  - A=Result, B=Model, C=Domain, D=TaskIdx
     headers = [
+        # 1. 결과/식별 (A-D: 집계 기준, 고정)
         "Result",            # A (PASS/FAIL)  ← 집계 기준
         "Model",             # B              ← 집계 기준
         "Domain",            # C              ← 집계 기준
         "TaskIdx",           # D              ← 집계 기준
-        "Reward",            # E
-        "Termination",       # F
-        "RewardBasis",       # G
-        "GT 필수툴",         # H (RequiredTools 요약)
-        "GT Actions (상세)", # I (name + arguments)
-        "CalledTools",       # J
-        "MissingTools",      # K
-        "RB_DB",             # L
-        "RB_COMMUNICATE",    # M
-        "RB_ACTION",         # N
-        "RB_ENV_ASSERTION",  # O
+        
+        # 2. 점수 (빠른 판단)
+        "Reward",            # E (0~1, 1이면 PASS)
+        
+        # 3. 정답(GT) - 무엇이 정답인가
+        "RewardBasis",       # F (뭘 채점하는가: DB? COMMUNICATE?)
+        "GT Actions (상세)", # G (정답 레시피: 이 툴들을 호출해야 함)
+        "GT 필수툴",         # H (간단 요약: 툴 이름만)
+        
+        # 4. 모델 행동 - 모델이 뭘 했는가
+        "CalledTools",       # I (모델이 실제로 호출한 툴)
+        "MissingTools",      # J (누락된 필수 툴 = 보통 FAIL 원인)
+        
+        # 5. 세부 점수 - 왜 이 점수인가
+        "RB_DB",             # K (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # L (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # M (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # N (시스템 설정이 맞나? telecom)
+        
+        # 6. 종료
+        "Termination",       # O (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
@@ -1252,7 +1450,7 @@ def create_runs_sheet(wb, runs, styles):
             tool_args_err_summary=tool_args_err_summary,
         )
 
-        # 노출 컬럼(요약)
+        # 노출 컬럼(요약) - 재배치된 순서에 맞춰 정렬
         result = "PASS" if run.get("Pass")==1 else "FAIL"
         task_idx = run.get("TaskIdx") or ""
         reward_basis_raw = run.get("RewardBasisRaw", "")
@@ -1263,21 +1461,27 @@ def create_runs_sheet(wb, runs, styles):
         missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
 
         row = [
+            # 1. 결과/식별
             result,
             run.get("ModelLabel",""),
             run.get("Domain",""),
             task_idx,
+            # 2. 점수
             run.get("Reward",0.0),
-            term,
+            # 3. 정답(GT)
             reward_basis_raw,
-            gt_required_tools,
             gt_actions_detail_str,  # GT Actions (상세)
+            gt_required_tools,
+            # 4. 모델 행동
             called_tools_str,
             missing_tools_str,
+            # 5. 세부 점수
             run.get("RB_DB"),
             run.get("RB_COMMUNICATE"),
             run.get("RB_ACTION"),
             run.get("RB_ENV_ASSERTION"),
+            # 6. 종료
+            term,
             # hidden(집계/디버깅)
             run.get("RunID",""),
             run.get("Trial",0),
@@ -1339,7 +1543,7 @@ def create_runs_sheet(wb, runs, styles):
         ),
     )
     # FAIL이면 MissingTools/Reward 축을 조금 더 눈에 띄게
-    fail_focus_range = f"K{first_data_row}:K{last_data_row}"  # MissingTools
+    fail_focus_range = f"J{first_data_row}:J{last_data_row}"  # MissingTools (J로 이동)
     ws.conditional_formatting.add(
         fail_focus_range,
         FormulaRule(
@@ -1348,7 +1552,7 @@ def create_runs_sheet(wb, runs, styles):
             stopIfTrue=False,
         ),
     )
-    fail_focus_range2 = f"L{first_data_row}:O{last_data_row}"  # RB_*
+    fail_focus_range2 = f"K{first_data_row}:N{last_data_row}"  # RB_* (K-N으로 이동)
     ws.conditional_formatting.add(
         fail_focus_range2,
         FormulaRule(
@@ -1361,23 +1565,29 @@ def create_runs_sheet(wb, runs, styles):
     ws.freeze_panes = f"A{hrow+1}"
     ws.auto_filter.ref = f"A{hrow}:{get_column_letter(len(headers))}{ws.max_row}"
 
-    # Column widths (핵심만 보이게)
+    # Column widths (재배치된 순서에 맞춰 조정)
     widths = {
+        # 1. 결과/식별
         "A":8,    # Result
         "B":26,   # Model
         "C":10,   # Domain
         "D":7,    # TaskIdx
+        # 2. 점수
         "E":8,    # Reward
-        "F":12,   # Termination
-        "G":18,   # RewardBasis
+        # 3. 정답(GT)
+        "F":18,   # RewardBasis
+        "G":35,   # GT Actions (상세)
         "H":22,   # GT 필수툴
-        "I":35,   # GT Actions (상세)
-        "J":24,   # CalledTools
-        "K":22,   # MissingTools
-        "L":10,   # RB_DB
-        "M":14,   # RB_COMMUNICATE
-        "N":10,   # RB_ACTION
-        "O":14,   # RB_ENV_ASSERTION
+        # 4. 모델 행동
+        "I":24,   # CalledTools
+        "J":22,   # MissingTools
+        # 5. 세부 점수
+        "K":10,   # RB_DB
+        "L":14,   # RB_COMMUNICATE
+        "M":10,   # RB_ACTION
+        "N":14,   # RB_ENV_ASSERTION
+        # 6. 종료
+        "O":12,   # Termination
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2363,6 +2573,9 @@ def generate_report(
     )                                                             # 요약(랭킹+매트릭스+Glossary)
     # 대화 시트는 제거(사용자 요청)
 
+    # ===== 평가 가이드 시트 (visible, 맨 앞에 배치) =====
+    create_guide_sheet(wb, styles)
+    
     # ===== helper sheets (hidden) =====
     create_task_summary_sheet(wb, all_logs, models_mapping, domains, styles)  # Pass^k 계산용
 
