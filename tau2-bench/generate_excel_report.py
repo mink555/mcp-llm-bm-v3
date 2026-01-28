@@ -2186,11 +2186,11 @@ def create_case_summary_sheet(wb, runs, styles):
 # 평가 대상 모델(표 표시 순서 고정)
 # - 다른 스크립트(generate_reports.py)에서도 동일한 순서를 재사용하기 위해 상수로 분리
 LLM_TO_LABEL: dict[str, str] = {
-    "openrouter/meta-llama/llama-3.3-70b-instruct": "llama-3.3-70b-instruct-FC",
-    "openrouter/mistralai/mistral-small-3.2-24b-instruct": "mistral-small-3.2-24b-instruct-FC",
-    "openrouter/qwen/qwen3-32b": "qwen3-32b-FC",
-    "openrouter/qwen/qwen3-14b": "qwen3-14b-FC",
-    "openrouter/qwen/qwen3-next-80b-a3b-instruct": "qwen3-next-80b-a3b-instruct-FC",
+    "openrouter/meta-llama/llama-3.3-70b-instruct": "llama-3.3-70b-instruct",
+    "openrouter/mistralai/mistral-small-3.2-24b-instruct": "mistral-small-3.2-24b-instruct",
+    "openrouter/qwen/qwen3-32b": "qwen3-32b",
+    "openrouter/qwen/qwen3-14b": "qwen3-14b",
+    "openrouter/qwen/qwen3-next-80b-a3b-instruct": "qwen3-next-80b-a3b-instruct",
 }
 
 def _find_default_base_dir() -> Path | None:
