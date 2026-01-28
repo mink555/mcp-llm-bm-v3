@@ -1307,7 +1307,70 @@ def create_guide_sheet(wb, styles):
     ws.append([""])  # 빈 줄
     row_idx += 1
     
-    # ===== 5. 3줄 요약 =====
+    # ===== 5. RewardBasis 조합표 (O/X 체크) =====
+    ws.append(["■ RewardBasis 조합표 - 어떤 축을 채점하는가 (현재 데이터셋 기준)"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    row_idx += 1
+    
+    rb_combos = [
+        ["DB", "COMMUNICATE", "ACTION", "ENV_ASSERTION", "빈도", "주 도메인", "의미 (무엇을 채점?)"],
+        ["O", "O", "X", "X", "267회 (59%)", "airline, retail", "DB 저장 + 사용자 안내"],
+        ["X", "X", "X", "O", "115회 (26%)", "telecom", "시스템 설정만 (data_mode, roaming 등)"],
+        ["X", "X", "X", "X", "68회 (15%)", "전체", "채점 안 함 (조기 종료 케이스)"],
+    ]
+    
+    for r in rb_combos:
+        ws.append(r)
+        if r == rb_combos[0]:  # 헤더
+            for c in ws[row_idx]:
+                c.font = styles["header"]["font"]
+                c.fill = styles["header"]["fill"]
+                c.alignment = styles["header"]["align"]
+                c.border = styles["data"]["border"]
+        else:
+            for c in ws[row_idx]:
+                c.border = styles["data"]["border"]
+                c.alignment = Alignment(horizontal="center" if c.column <= 4 else "left", vertical="center", wrap_text=True)
+                # O는 초록, X는 회색
+                if c.value == "O":
+                    c.font = Font(bold=True, color="00B050")
+                    c.fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+                elif c.value == "X":
+                    c.font = Font(bold=True, color="7F7F7F")
+                    c.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # 중요 포인트 추가
+    ws.append(["💡 핵심 포인트"])
+    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=12, bold=True, color="0070C0")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="DEEBF7", end_color="DEEBF7", fill_type="solid")
+    ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[row_idx].height = 22
+    row_idx += 1
+    
+    key_points = [
+        ["• 'X' 표시된 축은 채점하지 않음 → ActionMismatches 있어도 ACTION='X'면 무시!"],
+        ["• airline/retail은 'DB + 안내' 중심, telecom은 '시스템 설정' 중심"],
+        ["• 현재 데이터셋에는 ACTION='O'인 케이스가 없음 (모두 100% ACTION 무시)"],
+    ]
+    
+    for r in key_points:
+        ws.append(r)
+        ws.merge_cells(f"A{row_idx}:F{row_idx}")
+        ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws.row_dimensions[row_idx].height = 20
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 7. 3줄 요약 =====
     ws.append(["■ 3줄 요약 (암기용)"])
     ws.merge_cells(f"A{row_idx}:F{row_idx}")
     ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="00B050")
