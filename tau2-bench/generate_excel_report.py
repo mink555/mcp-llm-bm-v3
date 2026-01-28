@@ -1670,25 +1670,27 @@ def create_runs_sheet(wb, runs, styles):
         "GT 필수툴",         # H (간단 요약: 툴 이름만)
         "GT env_assertions", # I (환경 조건: telecom에서 주로 사용)
         "GT NL Assertions",  # J (자연어 평가 기준: 해야 할 것)
+        "GT Communicate",    # K (모델이 반드시 말해야 하는 값들)
         
         # 4. 모델 행동 - 모델이 뭘 했는가
-        "CalledTools",       # K (모델이 실제로 호출한 툴)
-        "MissingTools",      # L (누락된 필수 툴 = 보통 FAIL 원인)
-        "Model 최종응답",    # M (모델이 사용자에게 한 마지막 말)
+        "CalledTools",       # L (모델이 실제로 호출한 툴)
+        "MissingTools",      # M (누락된 필수 툴 = 보통 FAIL 원인)
+        "Model 최종응답",    # N (모델이 사용자에게 한 마지막 말)
+        "COMMUNICATE 관련 응답", # O (GT Communicate 값이 포함된 메시지)
         
         # 5. 실패 원인 상세 - GT vs 모델 비교
-        "깨진 Actions",      # N (action_match=False인 GT Actions)
-        "깨진 env_assertions", # O (실패한 env_assertions 목록)
-        "DB 불일치",         # P (DB가 Golden과 다른지 여부)
+        "깨진 Actions",      # P (action_match=False인 GT Actions)
+        "깨진 env_assertions", # Q (실패한 env_assertions 목록)
+        "DB 불일치",         # R (DB가 Golden과 다른지 여부)
         
         # 6. 세부 점수 - 왜 이 점수인가
-        "RB_DB",             # Q (DB 상태가 정답과 같은가?)
-        "RB_COMMUNICATE",    # R (사용자에게 제대로 안내했나?)
-        "RB_ACTION",         # S (필수 행동을 다 했나?)
-        "RB_ENV_ASSERTION",  # T (시스템 설정이 맞나? telecom)
+        "RB_DB",             # S (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # T (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # U (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # V (시스템 설정이 맞나? telecom)
         
         # 7. 종료
-        "Termination",       # U (종료 사유: user_stop 등)
+        "Termination",       # W (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
@@ -1755,12 +1757,16 @@ def create_runs_sheet(wb, runs, styles):
         gt_env_assertions_str = "\n".join(gt_env_assertions_list) if gt_env_assertions_list else ""
         gt_nl_assertions_list = run.get("GTNLAssertions") or []
         gt_nl_assertions_str = "\n".join(gt_nl_assertions_list) if gt_nl_assertions_list else ""
+        gt_communicate_info_list = run.get("GTCommunicateInfo") or []
+        gt_communicate_info_str = "\n".join([f"'{item}'" for item in gt_communicate_info_list]) if gt_communicate_info_list else ""
         called_tools_str = ", ".join(called_tools) if called_tools else ""
         missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
         # 모델 행동 상세
         agent_final_raw = run.get("AgentFinalRaw", "")
         # 최종 응답 요약 (긴 경우 앞부분만)
         model_final_summary = agent_final_raw[:300] + "..." if len(agent_final_raw) > 300 else agent_final_raw
+        # COMMUNICATE 관련 응답 (GT 값이 포함된 메시지)
+        communicate_related_messages = run.get("CommunicateRelatedMessages", "")
         # 실패 원인 상세
         action_mismatches_str = "\n".join(action_mismatches) if action_mismatches else ""
         failed_env_assertions_str = "\n".join(failed_env_assertions) if failed_env_assertions else ""
@@ -1780,10 +1786,12 @@ def create_runs_sheet(wb, runs, styles):
             gt_required_tools,      # GT 필수툴
             gt_env_assertions_str,  # GT env_assertions
             gt_nl_assertions_str,   # GT NL Assertions
+            gt_communicate_info_str, # GT Communicate
             # 4. 모델 행동
             called_tools_str,
             missing_tools_str,
             model_final_summary,    # Model 최종응답
+            communicate_related_messages, # COMMUNICATE 관련 응답
             # 5. 실패 원인 상세
             action_mismatches_str,  # 깨진 Actions
             failed_env_assertions_str,  # 깨진 env_assertions
@@ -1892,21 +1900,23 @@ def create_runs_sheet(wb, runs, styles):
         "H":22,   # GT 필수툴
         "I":30,   # GT env_assertions
         "J":40,   # GT NL Assertions
+        "K":30,   # GT Communicate
         # 4. 모델 행동
-        "K":24,   # CalledTools
-        "L":22,   # MissingTools
-        "M":50,   # Model 최종응답
+        "L":24,   # CalledTools
+        "M":22,   # MissingTools
+        "N":50,   # Model 최종응답
+        "O":50,   # COMMUNICATE 관련 응답
         # 5. 실패 원인 상세
-        "N":35,   # 깨진 Actions
-        "O":30,   # 깨진 env_assertions
-        "P":12,   # DB 불일치
+        "P":35,   # 깨진 Actions
+        "Q":30,   # 깨진 env_assertions
+        "R":12,   # DB 불일치
         # 6. 세부 점수
-        "Q":10,   # RB_DB
-        "R":14,   # RB_COMMUNICATE
-        "S":10,   # RB_ACTION
-        "T":14,   # RB_ENV_ASSERTION
+        "S":10,   # RB_DB
+        "T":14,   # RB_COMMUNICATE
+        "U":10,   # RB_ACTION
+        "V":14,   # RB_ENV_ASSERTION
         # 7. 종료
-        "U":12,   # Termination
+        "W":12,   # Termination
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2577,12 +2587,15 @@ def generate_report(
             task_order_map[(domain, tid)] = idx_t
             crit = (t.get("evaluation_criteria") or {})
             actions = crit.get("actions") or []
-            # 원본 GT: actions + env_assertions + nl_assertions(원문 그대로)
+            # 원본 GT: actions + env_assertions + nl_assertions + evaluation_criteria(원문 그대로)
             gt_raw = json.dumps(
                 {
                     "actions": actions,
                     "env_assertions": (crit.get("env_assertions") or []),
                     "nl_assertions": (crit.get("nl_assertions") or []),
+                    "evaluation_criteria": {
+                        "communicate_info": (crit.get("communicate_info") or []),
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -2768,13 +2781,33 @@ def generate_report(
                                 gt_actions_detail.append(f"{name}()")
                     # NL Assertions 추출
                     gt_nl_assertions = gt_obj.get("nl_assertions") or []
+                    # Communicate Info 추출
+                    ec = gt_obj.get("evaluation_criteria") or {}
+                    gt_communicate_info = ec.get("communicate_info") or []
             except Exception:
                 required_tools = []
                 gt_actions_detail = []
                 gt_nl_assertions = []
+                gt_communicate_info = []
             gt_actions_detail_str = "\n".join(gt_actions_detail) if gt_actions_detail else "(없음)"
             called_tools = sorted({n for n in tool_names if n})
             missing_tools = sorted(set(required_tools) - set(called_tools))
+            
+            # COMMUNICATE 관련 응답 추출 (GT 값이 포함된 assistant 메시지)
+            communicate_related_messages_list = []
+            if gt_communicate_info:
+                for msg in messages:
+                    if msg.get("role") == "assistant":
+                        msg_content = msg.get("content", "")
+                        if msg_content:
+                            # GT Communicate 값이 하나라도 포함되어 있는지 체크 (evaluator와 동일한 로직)
+                            for info_str in gt_communicate_info:
+                                if info_str.lower() in msg_content.lower().replace(",", ""):
+                                    # 이 메시지에 GT 값이 포함됨
+                                    preview = msg_content[:200] + "..." if len(msg_content) > 200 else msg_content
+                                    communicate_related_messages_list.append(f"[포함: '{info_str}'] {preview}")
+                                    break  # 한 메시지에서 여러 값을 찾더라도 한 번만 추가
+            communicate_related_messages_str = "\n\n".join(communicate_related_messages_list) if communicate_related_messages_list else ""
 
             # 실패 근거(필수 액션 미충족 등) 계산
             mismatches = [a for a in action_checks if a and (a.get("action_match") is False)]
@@ -2821,6 +2854,8 @@ def generate_report(
                     "GTActionsDetail": gt_actions_detail_str,
                     "GTEnvAssertions": gt_env_assertions,
                     "GTNLAssertions": gt_nl_assertions,
+                    "GTCommunicateInfo": gt_communicate_info,
+                    "CommunicateRelatedMessages": communicate_related_messages_str,
                     "AgentFinalRaw": agent_final,
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,
