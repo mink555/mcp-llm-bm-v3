@@ -1678,19 +1678,24 @@ def create_runs_sheet(wb, runs, styles):
         "Model 최종응답",    # N (모델이 사용자에게 한 마지막 말)
         "COMMUNICATE 관련 응답", # O (GT Communicate 값이 포함된 메시지)
         
-        # 5. 실패 원인 상세 - GT vs 모델 비교
-        "깨진 Actions",      # P (action_match=False인 GT Actions)
-        "깨진 env_assertions", # Q (실패한 env_assertions 목록)
-        "DB 불일치",         # R (DB가 Golden과 다른지 여부)
+        # 5. 평가 상세 - GT vs 모델 매칭 결과
+        "DB 매칭 상세",      # P (DB가 Golden과 같은지 상세)
+        "ACTION 매칭 상세",  # Q (각 GT Action 매칭 여부)
+        "ENV_ASSERTION 매칭 상세", # R (각 ENV Assertion 성공/실패)
         
-        # 6. 세부 점수 - 왜 이 점수인가
-        "RB_DB",             # S (DB 상태가 정답과 같은가?)
-        "RB_COMMUNICATE",    # T (사용자에게 제대로 안내했나?)
-        "RB_ACTION",         # U (필수 행동을 다 했나?)
-        "RB_ENV_ASSERTION",  # V (시스템 설정이 맞나? telecom)
+        # 6. 실패 원인 요약 (기존 유지)
+        "깨진 Actions",      # S (action_match=False인 GT Actions)
+        "깨진 env_assertions", # T (실패한 env_assertions 목록)
+        "DB 불일치",         # U (DB가 Golden과 다른지 여부)
         
-        # 7. 종료
-        "Termination",       # W (종료 사유: user_stop 등)
+        # 7. 세부 점수 - 왜 이 점수인가
+        "RB_DB",             # V (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # W (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # X (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # Y (시스템 설정이 맞나? telecom)
+        
+        # 8. 종료
+        "Termination",       # Z (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
@@ -1767,6 +1772,12 @@ def create_runs_sheet(wb, runs, styles):
         model_final_summary = agent_final_raw[:300] + "..." if len(agent_final_raw) > 300 else agent_final_raw
         # COMMUNICATE 관련 응답 (GT 값이 포함된 메시지)
         communicate_related_messages = run.get("CommunicateRelatedMessages", "")
+        
+        # 평가 상세 (새로 추가)
+        db_match_detail = run.get("DBMatchDetail", "")
+        action_match_detail = run.get("ActionMatchDetail", "")
+        env_assertion_match_detail = run.get("EnvAssertionMatchDetail", "")
+        
         # 실패 원인 상세
         action_mismatches_str = "\n".join(action_mismatches) if action_mismatches else ""
         failed_env_assertions_str = "\n".join(failed_env_assertions) if failed_env_assertions else ""
@@ -1792,16 +1803,20 @@ def create_runs_sheet(wb, runs, styles):
             missing_tools_str,
             model_final_summary,    # Model 최종응답
             communicate_related_messages, # COMMUNICATE 관련 응답
-            # 5. 실패 원인 상세
+            # 5. 평가 상세
+            db_match_detail,        # DB 매칭 상세
+            action_match_detail,    # ACTION 매칭 상세
+            env_assertion_match_detail, # ENV_ASSERTION 매칭 상세
+            # 6. 실패 원인 요약
             action_mismatches_str,  # 깨진 Actions
             failed_env_assertions_str,  # 깨진 env_assertions
             db_mismatch,            # DB 불일치
-            # 6. 세부 점수
+            # 7. 세부 점수
             run.get("RB_DB"),
             run.get("RB_COMMUNICATE"),
             run.get("RB_ACTION"),
             run.get("RB_ENV_ASSERTION"),
-            # 7. 종료
+            # 8. 종료
             term,
             # hidden(집계/디버깅)
             run.get("RunID",""),
@@ -1906,12 +1921,21 @@ def create_runs_sheet(wb, runs, styles):
         "M":22,   # MissingTools
         "N":50,   # Model 최종응답
         "O":50,   # COMMUNICATE 관련 응답
-        # 5. 실패 원인 상세
-        "P":35,   # 깨진 Actions
-        "Q":30,   # 깨진 env_assertions
-        "R":12,   # DB 불일치
-        # 6. 세부 점수
-        "S":10,   # RB_DB
+        # 5. 평가 상세
+        "P":40,   # DB 매칭 상세
+        "Q":50,   # ACTION 매칭 상세
+        "R":50,   # ENV_ASSERTION 매칭 상세
+        # 6. 실패 원인 요약
+        "S":35,   # 깨진 Actions
+        "T":30,   # 깨진 env_assertions
+        "U":12,   # DB 불일치
+        # 7. 세부 점수
+        "V":10,   # RB_DB
+        "W":14,   # RB_COMMUNICATE
+        "X":10,   # RB_ACTION
+        "Y":16,   # RB_ENV_ASSERTION
+        # 8. 종료
+        "Z":12,   # Termination
         "T":14,   # RB_COMMUNICATE
         "U":10,   # RB_ACTION
         "V":14,   # RB_ENV_ASSERTION
@@ -2813,6 +2837,59 @@ def generate_report(
                                 communicate_related_messages_list.append(f"[포함: {values_str}] {preview}")
             communicate_related_messages_str = "\n\n".join(communicate_related_messages_list) if communicate_related_messages_list else ""
 
+            # === 평가 상세 추출 (tau2 철학 반영) ===
+            
+            # 1. DB 매칭 상세
+            db_match_detail_str = ""
+            db_check = reward_info.get("db_check") or {}
+            if db_check:
+                db_match = db_check.get("db_match")
+                if db_match is True:
+                    db_match_detail_str = "✅ DB 일치"
+                elif db_match is False:
+                    db_match_detail_str = "❌ DB 불일치"
+                else:
+                    db_match_detail_str = "N/A"
+            
+            # 2. ACTION 매칭 상세
+            action_match_detail_list = []
+            for action_check in action_checks:
+                if action_check:
+                    action = action_check.get("action", {})
+                    action_match = action_check.get("action_match", False)
+                    name = action.get("name", "")
+                    args = action.get("arguments", {})
+                    
+                    if args:
+                        args_str = ", ".join([f"{k}={v}" for k, v in args.items()])
+                        action_str = f"{name}({args_str})"
+                    else:
+                        action_str = f"{name}()"
+                    
+                    status = "✅" if action_match else "❌"
+                    action_match_detail_list.append(f"{status} {action_str}")
+            action_match_detail_str = "\n".join(action_match_detail_list) if action_match_detail_list else ""
+            
+            # 3. ENV_ASSERTION 매칭 상세
+            env_assertion_match_detail_list = []
+            env_assertions = reward_info.get("env_assertions") or []
+            for env_check in env_assertions:
+                if env_check:
+                    env_assertion = env_check.get("env_assertion", {})
+                    met = env_check.get("met", False)
+                    func_name = env_assertion.get("func_name", "")
+                    args = env_assertion.get("arguments", {})
+                    
+                    if args:
+                        args_str = ", ".join([f"{k}={v}" for k, v in args.items()])
+                        assertion_str = f"{func_name}({args_str})"
+                    else:
+                        assertion_str = f"{func_name}()"
+                    
+                    status = "✅" if met else "❌"
+                    env_assertion_match_detail_list.append(f"{status} {assertion_str}")
+            env_assertion_match_detail_str = "\n".join(env_assertion_match_detail_list) if env_assertion_match_detail_list else ""
+
             # 실패 근거(필수 액션 미충족 등) 계산
             mismatches = [a for a in action_checks if a and (a.get("action_match") is False)]
             mismatch_count = len(mismatches)
@@ -2860,6 +2937,9 @@ def generate_report(
                     "GTNLAssertions": gt_nl_assertions,
                     "GTCommunicateInfo": gt_communicate_info,
                     "CommunicateRelatedMessages": communicate_related_messages_str,
+                    "DBMatchDetail": db_match_detail_str,
+                    "ActionMatchDetail": action_match_detail_str,
+                    "EnvAssertionMatchDetail": env_assertion_match_detail_str,
                     "AgentFinalRaw": agent_final,
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,

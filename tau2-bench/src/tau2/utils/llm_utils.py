@@ -249,13 +249,13 @@ def generate(
         tool_call_id = tool_call.id
         raw_args = tool_call.function.arguments
         parsed_tool_calls.append(
-            ToolCall(
+        ToolCall(
                 id=tool_call_id,
                 name=tool_name,
                 arguments=_safe_parse_tool_arguments(
                     raw_args, tool_name=tool_name, tool_call_id=tool_call_id
                 ),
-            )
+        )
         )
     tool_calls = parsed_tool_calls
     tool_calls = tool_calls or None
