@@ -467,7 +467,7 @@ class Orchestrator:
                 self.message, self.user_state
             )
             try:
-                user_msg.validate()
+            user_msg.validate()
             except Exception as e:
                 # User simulator protocol violation (e.g., empty content and no tool_calls)
                 self.num_errors += 1
@@ -495,7 +495,7 @@ class Orchestrator:
                 self.message, self.agent_state
             )
             try:
-                agent_msg.validate()
+            agent_msg.validate()
             except Exception as e:
                 # Agent protocol violation (e.g., empty content and no tool_calls)
                 self.num_errors += 1

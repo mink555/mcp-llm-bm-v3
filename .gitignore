@@ -2,11 +2,33 @@
 # macOS
 .DS_Store
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
 # dotenv (never commit secrets)
 .env
 .env.local
 .env.*.local
 
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
 # TAU2 결과 산출물(리포트/중간 결과)
 tau2-bench/results/
 tau2-bench/*.xlsx
+
+# Virtual environments
+.venv/
+venv/
+env/
