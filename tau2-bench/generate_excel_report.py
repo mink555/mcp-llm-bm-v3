@@ -1674,21 +1674,26 @@ def create_runs_sheet(wb, runs, styles):
         # 4. 모델 행동 - 모델이 뭘 했는가
         "CalledTools",       # K (모델이 실제로 호출한 툴)
         "MissingTools",      # L (누락된 필수 툴 = 보통 FAIL 원인)
+        "Model 최종응답",    # M (모델이 사용자에게 한 마지막 말)
         
-        # 5. 세부 점수 - 왜 이 점수인가
-        "RB_DB",             # M (DB 상태가 정답과 같은가?)
-        "RB_COMMUNICATE",    # N (사용자에게 제대로 안내했나?)
-        "RB_ACTION",         # O (필수 행동을 다 했나?)
-        "RB_ENV_ASSERTION",  # P (시스템 설정이 맞나? telecom)
+        # 5. 실패 원인 상세 - GT vs 모델 비교
+        "깨진 Actions",      # N (action_match=False인 GT Actions)
+        "깨진 env_assertions", # O (실패한 env_assertions 목록)
+        "DB 불일치",         # P (DB가 Golden과 다른지 여부)
         
-        # 6. 종료
-        "Termination",       # Q (종료 사유: user_stop 등)
+        # 6. 세부 점수 - 왜 이 점수인가
+        "RB_DB",             # Q (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # R (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # S (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # T (시스템 설정이 맞나? telecom)
+        
+        # 7. 종료
+        "Termination",       # U (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
         "Trial",
         "RB_NL_ASSERTION",
-        "FailedEnvAssertions",
         "ActionMismatches",
         "UserFirstUtterance(원문)",
         "UserScenario(원문 JSON)",
@@ -1752,6 +1757,14 @@ def create_runs_sheet(wb, runs, styles):
         gt_nl_assertions_str = "\n".join(gt_nl_assertions_list) if gt_nl_assertions_list else ""
         called_tools_str = ", ".join(called_tools) if called_tools else ""
         missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
+        # 모델 행동 상세
+        agent_final_raw = run.get("AgentFinalRaw", "")
+        # 최종 응답 요약 (긴 경우 앞부분만)
+        model_final_summary = agent_final_raw[:300] + "..." if len(agent_final_raw) > 300 else agent_final_raw
+        # 실패 원인 상세
+        action_mismatches_str = "\n".join(action_mismatches) if action_mismatches else ""
+        failed_env_assertions_str = "\n".join(failed_env_assertions) if failed_env_assertions else ""
+        db_mismatch = run.get("DBMismatch", "N/A")
 
         row = [
             # 1. 결과/식별
@@ -1770,18 +1783,22 @@ def create_runs_sheet(wb, runs, styles):
             # 4. 모델 행동
             called_tools_str,
             missing_tools_str,
-            # 5. 세부 점수
+            model_final_summary,    # Model 최종응답
+            # 5. 실패 원인 상세
+            action_mismatches_str,  # 깨진 Actions
+            failed_env_assertions_str,  # 깨진 env_assertions
+            db_mismatch,            # DB 불일치
+            # 6. 세부 점수
             run.get("RB_DB"),
             run.get("RB_COMMUNICATE"),
             run.get("RB_ACTION"),
             run.get("RB_ENV_ASSERTION"),
-            # 6. 종료
+            # 7. 종료
             term,
             # hidden(집계/디버깅)
             run.get("RunID",""),
             run.get("Trial",0),
             run.get("RB_NL_ASSERTION"),
-            "\n".join(failed_env_assertions) if failed_env_assertions else "",
             "\n".join(action_mismatches) if action_mismatches else "",
             first_user_raw,
             req_raw,
@@ -1878,13 +1895,18 @@ def create_runs_sheet(wb, runs, styles):
         # 4. 모델 행동
         "K":24,   # CalledTools
         "L":22,   # MissingTools
-        # 5. 세부 점수
-        "M":10,   # RB_DB
-        "N":14,   # RB_COMMUNICATE
-        "O":10,   # RB_ACTION
-        "P":14,   # RB_ENV_ASSERTION
-        # 6. 종료
-        "Q":12,   # Termination
+        "M":50,   # Model 최종응답
+        # 5. 실패 원인 상세
+        "N":35,   # 깨진 Actions
+        "O":30,   # 깨진 env_assertions
+        "P":12,   # DB 불일치
+        # 6. 세부 점수
+        "Q":10,   # RB_DB
+        "R":14,   # RB_COMMUNICATE
+        "S":10,   # RB_ACTION
+        "T":14,   # RB_ENV_ASSERTION
+        # 7. 종료
+        "U":12,   # Termination
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2594,6 +2616,10 @@ def generate_report(
             failed_env_assertions = _extract_failed_env_assertions(reward_info)
             gt_env_assertions = _extract_gt_env_assertions(reward_info)
             action_mismatches = _extract_action_mismatches(reward_info)
+            # DB 불일치 정보
+            db_check = reward_info.get("db_check") or {}
+            db_match = db_check.get("db_match")
+            db_mismatch_str = "일치" if db_match else ("불일치" if db_match is False else "N/A")
             reward_basis = reward_info.get("reward_basis") or []
             if isinstance(reward_basis, list):
                 reward_basis_norm = [ _normalize_reward_key(x) for x in reward_basis ]
@@ -2805,6 +2831,7 @@ def generate_report(
                     "FailedEnvAssertions": failed_env_assertions,
                     "FailedEnvAssertionCount": len(failed_env_assertions),
                     "ActionMismatches": action_mismatches,
+                    "DBMismatch": db_mismatch_str,
                     "ToolArgsJSONErrorCount": tool_args_err_cnt,
                     "ToolArgsJSONErrorSummary": tool_args_err_summary,
                     "ToolArgsJSONErrorsRaw": tool_args_errs_raw,
