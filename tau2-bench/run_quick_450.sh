@@ -37,7 +37,7 @@ PY
 fi
 if [ "${#TAU2[@]}" -eq 0 ]; then
   echo "[ERROR] tau2 실행기를 찾지 못했습니다."
-  echo "  - 해결1) pyenv를 쓰는 경우: tau2가 설치된 버전으로 전환 (예: pyenv shell 3.13.6/envs/mcp-llm-bm-v3)"
+  echo "  - 해결1) pyenv를 쓰는 경우: tau2가 설치된 버전으로 전환 (예: pyenv shell 3.13.x/envs/tau2-bench)"
   echo "  - 해결2) tau2-bench 설치: cd tau2-bench && python -m pip install -e ."
   exit 1
 fi
