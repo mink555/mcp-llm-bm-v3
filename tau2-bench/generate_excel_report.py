@@ -130,6 +130,21 @@ def _extract_failed_env_assertions(reward_info: dict) -> list[str]:
     return out
 
 
+def _extract_gt_env_assertions(reward_info: dict) -> list[str]:
+    """GT env_assertions 추출 (reward_info.env_assertions에서 env_assertion 정의를 가져옴)"""
+    out: list[str] = []
+    for item in (reward_info or {}).get("env_assertions") or []:
+        if not isinstance(item, dict):
+            continue
+        env_a = item.get("env_assertion") or {}
+        if isinstance(env_a, dict):
+            fn = env_a.get("func_name") or ""
+            args = env_a.get("arguments") or {}
+            if fn:
+                out.append(_fmt_kv_call(fn, args))
+    return out
+
+
 def _extract_action_mismatches(reward_info: dict) -> list[str]:
     out: list[str] = []
     for item in (reward_info or {}).get("action_checks") or []:
@@ -1653,19 +1668,20 @@ def create_runs_sheet(wb, runs, styles):
         "RewardBasis",       # F (뭘 채점하는가: DB? COMMUNICATE?)
         "GT Actions (상세)", # G (정답 레시피: 이 툴들을 호출해야 함)
         "GT 필수툴",         # H (간단 요약: 툴 이름만)
+        "GT env_assertions", # I (환경 조건: telecom에서 주로 사용)
         
         # 4. 모델 행동 - 모델이 뭘 했는가
-        "CalledTools",       # I (모델이 실제로 호출한 툴)
-        "MissingTools",      # J (누락된 필수 툴 = 보통 FAIL 원인)
+        "CalledTools",       # J (모델이 실제로 호출한 툴)
+        "MissingTools",      # K (누락된 필수 툴 = 보통 FAIL 원인)
         
         # 5. 세부 점수 - 왜 이 점수인가
-        "RB_DB",             # K (DB 상태가 정답과 같은가?)
-        "RB_COMMUNICATE",    # L (사용자에게 제대로 안내했나?)
-        "RB_ACTION",         # M (필수 행동을 다 했나?)
-        "RB_ENV_ASSERTION",  # N (시스템 설정이 맞나? telecom)
+        "RB_DB",             # L (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # M (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # N (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # O (시스템 설정이 맞나? telecom)
         
         # 6. 종료
-        "Termination",       # O (종료 사유: user_stop 등)
+        "Termination",       # P (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
@@ -1728,6 +1744,8 @@ def create_runs_sheet(wb, runs, styles):
         # GT/툴 요약
         gt_required_tools = ", ".join(required_tools) if required_tools else ""
         gt_actions_detail_str = run.get("GTActionsDetail", "(없음)")
+        gt_env_assertions_list = run.get("GTEnvAssertions") or []
+        gt_env_assertions_str = "\n".join(gt_env_assertions_list) if gt_env_assertions_list else ""
         called_tools_str = ", ".join(called_tools) if called_tools else ""
         missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
 
@@ -1742,7 +1760,8 @@ def create_runs_sheet(wb, runs, styles):
             # 3. 정답(GT)
             reward_basis_raw,
             gt_actions_detail_str,  # GT Actions (상세)
-            gt_required_tools,
+            gt_required_tools,      # GT 필수툴
+            gt_env_assertions_str,  # GT env_assertions
             # 4. 모델 행동
             called_tools_str,
             missing_tools_str,
@@ -1849,16 +1868,17 @@ def create_runs_sheet(wb, runs, styles):
         "F":18,   # RewardBasis
         "G":35,   # GT Actions (상세)
         "H":22,   # GT 필수툴
+        "I":30,   # GT env_assertions
         # 4. 모델 행동
-        "I":24,   # CalledTools
-        "J":22,   # MissingTools
+        "J":24,   # CalledTools
+        "K":22,   # MissingTools
         # 5. 세부 점수
-        "K":10,   # RB_DB
-        "L":14,   # RB_COMMUNICATE
-        "M":10,   # RB_ACTION
-        "N":14,   # RB_ENV_ASSERTION
+        "L":10,   # RB_DB
+        "M":14,   # RB_COMMUNICATE
+        "N":10,   # RB_ACTION
+        "O":14,   # RB_ENV_ASSERTION
         # 6. 종료
-        "O":12,   # Termination
+        "P":12,   # Termination
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2565,6 +2585,7 @@ def generate_report(
             action_checks = reward_info.get("action_checks") or []
             # 실패 원인(원문 기반)
             failed_env_assertions = _extract_failed_env_assertions(reward_info)
+            gt_env_assertions = _extract_gt_env_assertions(reward_info)
             action_mismatches = _extract_action_mismatches(reward_info)
             reward_basis = reward_info.get("reward_basis") or []
             if isinstance(reward_basis, list):
@@ -2760,6 +2781,7 @@ def generate_report(
                     "GTRaw": gt_raw,
                     "GTSummary": gt_summary,
                     "GTActionsDetail": gt_actions_detail_str,
+                    "GTEnvAssertions": gt_env_assertions,
                     "AgentFinalRaw": agent_final,
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,
