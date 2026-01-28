@@ -1344,7 +1344,7 @@ def create_guide_sheet(wb, styles):
         ["DB\n(데이터)", "COMMUNICATE\n(안내)", "ACTION\n(액션)", "ENV\n(설정)", "빈도", "주 도메인", "점수 계산 공식", "언제 이 조합을 쓰나?"],
         ["O", "O", "X", "X", "267회\n(59%)", "airline\nretail", "Reward = RB_DB × RB_COMMUNICATE", "DB에 올바르게 저장하고, 사용자에게 확인 정보를 안내해야 하는 경우.\n예: 예약 생성, 주문 변경"],
         ["X", "X", "X", "O", "115회\n(26%)", "telecom", "Reward = RB_ENV_ASSERTION", "시스템 설정만 바꾸면 되는 경우. DB 변경이나 안내는 덜 중요.\n예: 모바일 데이터 켜기, 로밍 끄기"],
-        ["X", "X", "X", "X", "68회\n(15%)", "전체", "Reward = 1.0 (무조건)", "조기 종료된 케이스. 채점할 기준이 없음.\n예: 에러로 중단, user_stop"],
+        ["X", "X", "X", "X", "68회\n(15%)", "전체", "Reward = 0.0 (채점 불가)", "조기 종료된 케이스. 채점 기준이 없어서 모두 FAIL 처리.\n예: 에러로 중단, user_stop, max_steps"],
     ]
     
     for r in rb_combos:
@@ -1406,7 +1406,7 @@ def create_guide_sheet(wb, styles):
         ["2. 점수 계산은 'O' 표시된 축들만 곱하기"],
         ["   → [O,O,X,X]: Reward = RB_DB × RB_COMMUNICATE"],
         ["   → [X,X,X,O]: Reward = RB_ENV_ASSERTION"],
-        ["   → [X,X,X,X]: Reward = 1.0 (채점 안 함)"],
+        ["   → [X,X,X,X]: Reward = 0.0 (채점 불가, 조기 종료 = FAIL)"],
         [""],
         ["3. 도메인별 차이"],
         ["   → airline/retail: 고객센터 시나리오 (DB 저장 + 안내 중심)"],
@@ -1415,6 +1415,7 @@ def create_guide_sheet(wb, styles):
         ["4. 현재 데이터셋 특징 (450개)"],
         ["   → ACTION='O'인 케이스 없음 (모두 100% ACTION 무시)"],
         ["   → 즉, '정확한 툴 호출 순서'보다 '최종 결과'가 중요한 태스크만 있음"],
+        ["   → [X,X,X,X] 케이스 68개는 모두 조기 종료로 FAIL (0.0점)"],
     ]
     
     for r in key_points:
@@ -1541,7 +1542,7 @@ def create_guide_sheet(wb, styles):
     row_idx += 1
     
     example3 = [
-        ["상황", "모델이 tool_calls를 하나도 안 내거나, 에러가 나서 중단됨. (Termination=user_stop, max_steps 등)"],
+        ["상황", "모델이 tool_calls를 하나도 안 내거나, 에러가 나서 중단됨. (Termination=agent_error, user_error, max_steps 등)"],
         ["모델 호출", "(없음 또는 불완전)"],
         ["", ""],
         ["평가 결과", ""],
@@ -1550,8 +1551,12 @@ def create_guide_sheet(wb, styles):
         ["  RB_ACTION", "None"],
         ["  RB_ENV_ASSERTION", "None"],
         ["", ""],
-        ["최종 점수", "Reward = 1.0 (기본값) → PASS ❓"],
-        ["핵심", "채점 불가한 케이스. Pass/Fail 구분 불가능. 실전에서는 FAIL로 봐야 함."],
+        ["최종 점수", "Reward = 0.0 → FAIL ❌"],
+        ["핵심", "RewardBasis=[]는 채점 불가 → 현재 데이터셋 68개 모두 0.0점 (FAIL)"],
+        ["", ""],
+        ["💡 참고", ""],
+        ["Termination 분포", "agent_error(25), user_error(24), max_steps(14), too_many_errors(5)"],
+        ["왜 FAIL?", "태스크를 완료하지 못하고 중단됐으므로 당연히 FAIL"],
     ]
     
     for r in example3:
