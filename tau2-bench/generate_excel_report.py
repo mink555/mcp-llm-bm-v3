@@ -1669,19 +1669,21 @@ def create_runs_sheet(wb, runs, styles):
         "GT Actions (상세)", # G (정답 레시피: 이 툴들을 호출해야 함)
         "GT 필수툴",         # H (간단 요약: 툴 이름만)
         "GT env_assertions", # I (환경 조건: telecom에서 주로 사용)
+        "GT DB필요",         # J (DB 채점 여부: DB가 basis에 있으면 Y)
+        "GT COMMUNICATE필요", # K (안내 채점 여부: COMMUNICATE가 basis에 있으면 Y)
         
         # 4. 모델 행동 - 모델이 뭘 했는가
-        "CalledTools",       # J (모델이 실제로 호출한 툴)
-        "MissingTools",      # K (누락된 필수 툴 = 보통 FAIL 원인)
+        "CalledTools",       # L (모델이 실제로 호출한 툴)
+        "MissingTools",      # M (누락된 필수 툴 = 보통 FAIL 원인)
         
         # 5. 세부 점수 - 왜 이 점수인가
-        "RB_DB",             # L (DB 상태가 정답과 같은가?)
-        "RB_COMMUNICATE",    # M (사용자에게 제대로 안내했나?)
-        "RB_ACTION",         # N (필수 행동을 다 했나?)
-        "RB_ENV_ASSERTION",  # O (시스템 설정이 맞나? telecom)
+        "RB_DB",             # N (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # O (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # P (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # Q (시스템 설정이 맞나? telecom)
         
         # 6. 종료
-        "Termination",       # P (종료 사유: user_stop 등)
+        "Termination",       # R (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
@@ -1741,11 +1743,15 @@ def create_runs_sheet(wb, runs, styles):
         result = "PASS" if run.get("Pass")==1 else "FAIL"
         task_idx = run.get("TaskIdx") or ""
         reward_basis_raw = run.get("RewardBasisRaw", "")
+        reward_basis_list = run.get("RewardBasis") or []
         # GT/툴 요약
         gt_required_tools = ", ".join(required_tools) if required_tools else ""
         gt_actions_detail_str = run.get("GTActionsDetail", "(없음)")
         gt_env_assertions_list = run.get("GTEnvAssertions") or []
         gt_env_assertions_str = "\n".join(gt_env_assertions_list) if gt_env_assertions_list else ""
+        # GT DB/COMMUNICATE 필요 여부 (RewardBasis에 포함되어 있는지)
+        gt_db_needed = "Y" if "DB" in reward_basis_list else "N"
+        gt_comm_needed = "Y" if "COMMUNICATE" in reward_basis_list else "N"
         called_tools_str = ", ".join(called_tools) if called_tools else ""
         missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
 
@@ -1762,6 +1768,8 @@ def create_runs_sheet(wb, runs, styles):
             gt_actions_detail_str,  # GT Actions (상세)
             gt_required_tools,      # GT 필수툴
             gt_env_assertions_str,  # GT env_assertions
+            gt_db_needed,           # GT DB필요
+            gt_comm_needed,         # GT COMMUNICATE필요
             # 4. 모델 행동
             called_tools_str,
             missing_tools_str,
@@ -1869,16 +1877,18 @@ def create_runs_sheet(wb, runs, styles):
         "G":35,   # GT Actions (상세)
         "H":22,   # GT 필수툴
         "I":30,   # GT env_assertions
+        "J":10,   # GT DB필요
+        "K":16,   # GT COMMUNICATE필요
         # 4. 모델 행동
-        "J":24,   # CalledTools
-        "K":22,   # MissingTools
+        "L":24,   # CalledTools
+        "M":22,   # MissingTools
         # 5. 세부 점수
-        "L":10,   # RB_DB
-        "M":14,   # RB_COMMUNICATE
-        "N":10,   # RB_ACTION
-        "O":14,   # RB_ENV_ASSERTION
+        "N":10,   # RB_DB
+        "O":14,   # RB_COMMUNICATE
+        "P":10,   # RB_ACTION
+        "Q":14,   # RB_ENV_ASSERTION
         # 6. 종료
-        "P":12,   # Termination
+        "R":12,   # Termination
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2765,6 +2775,7 @@ def generate_report(
                     "RewardBreakdownJSON": json.dumps(reward_breakdown, ensure_ascii=False),
                     "RewardBreakdown": reward_breakdown,
                     "RewardBasisRaw": json.dumps(reward_basis_norm, ensure_ascii=False),
+                    "RewardBasis": reward_basis_norm,
                     "RB_ENV_ASSERTION": rb_env,
                     "RB_ACTION": rb_action,
                     "RB_DB": rb_db,
