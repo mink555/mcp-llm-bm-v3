@@ -1308,63 +1308,251 @@ def create_guide_sheet(wb, styles):
     row_idx += 1
     
     # ===== 5. RewardBasis 조합표 (O/X 체크) =====
-    ws.append(["■ RewardBasis 조합표 - 어떤 축을 채점하는가 (현재 데이터셋 기준)"])
-    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    ws.append(["■ RewardBasis 조합표 - 어떤 축을 채점하는가? (O=채점함, X=무시)"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
     ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
     ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     row_idx += 1
     
+    # 축 설명 추가
+    ws.append(["각 축의 의미:"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=11, italic=True, color="595959")
+    ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center")
+    row_idx += 1
+    
+    axis_desc = [
+        ["  • DB", "= 데이터베이스 상태 (Golden DB vs 모델 DB 비교)", "", "", "", "", "", ""],
+        ["  • COMMUNICATE", "= 사용자 안내 (필수 정보 전달 여부)", "", "", "", "", "", ""],
+        ["  • ACTION", "= 필수 액션 수행 (GT actions와 정확히 일치)", "", "", "", "", "", ""],
+        ["  • ENV_ASSERTION", "= 시스템 설정 (data_mode, roaming 등)", "", "", "", "", "", ""],
+    ]
+    
+    for r in axis_desc:
+        ws.append(r)
+        ws.merge_cells(f"A{row_idx}:H{row_idx}")
+        ws[f"A{row_idx}"].font = Font(size=10, color="595959")
+        ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[row_idx].height = 18
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # 조합표 헤더
     rb_combos = [
-        ["DB", "COMMUNICATE", "ACTION", "ENV_ASSERTION", "빈도", "주 도메인", "의미 (무엇을 채점?)"],
-        ["O", "O", "X", "X", "267회 (59%)", "airline, retail", "DB 저장 + 사용자 안내"],
-        ["X", "X", "X", "O", "115회 (26%)", "telecom", "시스템 설정만 (data_mode, roaming 등)"],
-        ["X", "X", "X", "X", "68회 (15%)", "전체", "채점 안 함 (조기 종료 케이스)"],
+        ["DB\n(데이터)", "COMMUNICATE\n(안내)", "ACTION\n(액션)", "ENV\n(설정)", "빈도", "주 도메인", "점수 계산 공식", "언제 이 조합을 쓰나?"],
+        ["O", "O", "X", "X", "267회\n(59%)", "airline\nretail", "Reward = RB_DB × RB_COMMUNICATE", "DB에 올바르게 저장하고, 사용자에게 확인 정보를 안내해야 하는 경우.\n예: 예약 생성, 주문 변경"],
+        ["X", "X", "X", "O", "115회\n(26%)", "telecom", "Reward = RB_ENV_ASSERTION", "시스템 설정만 바꾸면 되는 경우. DB 변경이나 안내는 덜 중요.\n예: 모바일 데이터 켜기, 로밍 끄기"],
+        ["X", "X", "X", "X", "68회\n(15%)", "전체", "Reward = 1.0 (무조건)", "조기 종료된 케이스. 채점할 기준이 없음.\n예: 에러로 중단, user_stop"],
     ]
     
     for r in rb_combos:
         ws.append(r)
         if r == rb_combos[0]:  # 헤더
             for c in ws[row_idx]:
-                c.font = styles["header"]["font"]
-                c.fill = styles["header"]["fill"]
-                c.alignment = styles["header"]["align"]
-                c.border = styles["data"]["border"]
+                c.font = Font(size=10, bold=True, color="FFFFFF")
+                c.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                c.border = Border(
+                    left=Side(style="thin", color="000000"),
+                    right=Side(style="thin", color="000000"),
+                    top=Side(style="thin", color="000000"),
+                    bottom=Side(style="thin", color="000000")
+                )
+            ws.row_dimensions[row_idx].height = 32
         else:
             for c in ws[row_idx]:
-                c.border = styles["data"]["border"]
-                c.alignment = Alignment(horizontal="center" if c.column <= 4 else "left", vertical="center", wrap_text=True)
+                c.border = Border(
+                    left=Side(style="thin", color="D0D0D0"),
+                    right=Side(style="thin", color="D0D0D0"),
+                    top=Side(style="thin", color="D0D0D0"),
+                    bottom=Side(style="thin", color="D0D0D0")
+                )
+                c.alignment = Alignment(
+                    horizontal="center" if c.column <= 6 else "left", 
+                    vertical="center", 
+                    wrap_text=True
+                )
                 # O는 초록, X는 회색
                 if c.value == "O":
-                    c.font = Font(bold=True, color="00B050")
+                    c.font = Font(bold=True, size=12, color="00B050")
                     c.fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
                 elif c.value == "X":
-                    c.font = Font(bold=True, color="7F7F7F")
+                    c.font = Font(bold=True, size=12, color="A6A6A6")
                     c.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+                else:
+                    c.font = Font(size=10)
+            ws.row_dimensions[row_idx].height = 45
         row_idx += 1
     
     ws.append([""])  # 빈 줄
     row_idx += 1
     
-    # 중요 포인트 추가
-    ws.append(["💡 핵심 포인트"])
-    ws.merge_cells(f"A{row_idx}:F{row_idx}")
+    # 중요 포인트 추가 (더 구체적으로)
+    ws.append(["💡 핵심 포인트 - 꼭 알아야 할 것"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
     ws[f"A{row_idx}"].font = Font(size=12, bold=True, color="0070C0")
     ws[f"A{row_idx}"].fill = PatternFill(start_color="DEEBF7", end_color="DEEBF7", fill_type="solid")
     ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-    ws.row_dimensions[row_idx].height = 22
+    ws.row_dimensions[row_idx].height = 24
     row_idx += 1
     
     key_points = [
-        ["• 'X' 표시된 축은 채점하지 않음 → ActionMismatches 있어도 ACTION='X'면 무시!"],
-        ["• airline/retail은 'DB + 안내' 중심, telecom은 '시스템 설정' 중심"],
-        ["• 현재 데이터셋에는 ACTION='O'인 케이스가 없음 (모두 100% ACTION 무시)"],
+        ["1. 'X' 표시된 축은 채점하지 않음"],
+        ["   → ActionMismatches가 100개 있어도, ACTION='X'면 점수에 영향 없음!"],
+        ["   → FailedEnvAssertions가 있어도, ENV_ASSERTION='X'면 무시됨!"],
+        [""],
+        ["2. 점수 계산은 'O' 표시된 축들만 곱하기"],
+        ["   → [O,O,X,X]: Reward = RB_DB × RB_COMMUNICATE"],
+        ["   → [X,X,X,O]: Reward = RB_ENV_ASSERTION"],
+        ["   → [X,X,X,X]: Reward = 1.0 (채점 안 함)"],
+        [""],
+        ["3. 도메인별 차이"],
+        ["   → airline/retail: 고객센터 시나리오 (DB 저장 + 안내 중심)"],
+        ["   → telecom: 기술 지원 시나리오 (시스템 설정 중심)"],
+        [""],
+        ["4. 현재 데이터셋 특징 (450개)"],
+        ["   → ACTION='O'인 케이스 없음 (모두 100% ACTION 무시)"],
+        ["   → 즉, '정확한 툴 호출 순서'보다 '최종 결과'가 중요한 태스크만 있음"],
     ]
     
     for r in key_points:
         ws.append(r)
-        ws.merge_cells(f"A{row_idx}:F{row_idx}")
+        ws.merge_cells(f"A{row_idx}:H{row_idx}")
+        if r[0].startswith(("1.", "2.", "3.", "4.")):
+            ws[f"A{row_idx}"].font = Font(size=10, bold=True, color="2F5496")
+        else:
+            ws[f"A{row_idx}"].font = Font(size=10, color="595959")
         ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-        ws.row_dimensions[row_idx].height = 20
+        ws.row_dimensions[row_idx].height = 20 if r[0] else 10
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # ===== 6. 조합별 실전 예시 =====
+    ws.append(["■ 조합별 실전 예시 - 점수 계산"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=14, bold=True, color="C00000")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    row_idx += 1
+    
+    # 예시 1: [O,O,X,X]
+    ws.append(["🔹 예시 1: [DB=O, COMMUNICATE=O, ACTION=X, ENV_ASSERTION=X] - airline/retail"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=11, bold=True, color="2F5496")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+    ws.row_dimensions[row_idx].height = 22
+    row_idx += 1
+    
+    example1 = [
+        ["상황", "고객이 항공편 예약을 변경하고 싶어함. 변경 후 확인 정보를 안내해야 함."],
+        ["GT 필수툴", "get_reservation_details, update_reservation"],
+        ["모델 호출", "get_reservation_details, update_reservation, transfer_to_human_agents (여기서 transfer는 불필요했지만 무시됨)"],
+        ["", ""],
+        ["평가 결과", ""],
+        ["  RB_DB", "1.0 (DB에 올바르게 저장됨)"],
+        ["  RB_COMMUNICATE", "1.0 (변경 내용을 안내함)"],
+        ["  RB_ACTION", "None (채점 안 함, 'X'니까!)"],
+        ["  RB_ENV_ASSERTION", "None (채점 안 함)"],
+        ["", ""],
+        ["최종 점수", "Reward = 1.0 × 1.0 = 1.0 → PASS ✅"],
+        ["핵심", "transfer_to_human_agents를 불필요하게 호출했지만, ACTION='X'라서 상관없음!"],
+    ]
+    
+    for r in example1:
+        ws.append(r)
+        ws.merge_cells(f"A{row_idx}:A{row_idx}") if r[0] else None
+        ws.merge_cells(f"B{row_idx}:H{row_idx}")
+        if r[0] in ["상황", "평가 결과", "최종 점수", "핵심"]:
+            ws[f"A{row_idx}"].font = Font(size=10, bold=True, color="2F5496")
+        else:
+            ws[f"A{row_idx}"].font = Font(size=9, color="595959")
+        ws[f"B{row_idx}"].font = Font(size=9, color="595959")
+        ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws[f"B{row_idx}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws.row_dimensions[row_idx].height = 18 if r[0] else 8
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # 예시 2: [X,X,X,O]
+    ws.append(["🔹 예시 2: [DB=X, COMMUNICATE=X, ACTION=X, ENV_ASSERTION=O] - telecom"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=11, bold=True, color="2F5496")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+    ws.row_dimensions[row_idx].height = 22
+    row_idx += 1
+    
+    example2 = [
+        ["상황", "사용자가 '인터넷이 안 돼요'라고 함. 모바일 데이터를 켜야 함."],
+        ["GT 필수툴", "turn_on_mobile_data"],
+        ["GT env_assertions", "assert_mobile_data_status(expected_status=True)"],
+        ["모델 호출", "get_mobile_data_status, turn_on_mobile_data"],
+        ["", ""],
+        ["평가 결과", ""],
+        ["  RB_DB", "None (채점 안 함, 'X'니까!)"],
+        ["  RB_COMMUNICATE", "None (채점 안 함)"],
+        ["  RB_ACTION", "None (채점 안 함)"],
+        ["  RB_ENV_ASSERTION", "1.0 (모바일 데이터가 켜져 있음 확인 ✅)"],
+        ["", ""],
+        ["최종 점수", "Reward = 1.0 → PASS ✅"],
+        ["핵심", "DB나 안내는 무시하고, 오직 '최종 시스템 설정'만 확인!"],
+    ]
+    
+    for r in example2:
+        ws.append(r)
+        ws.merge_cells(f"A{row_idx}:A{row_idx}") if r[0] else None
+        ws.merge_cells(f"B{row_idx}:H{row_idx}")
+        if r[0] in ["상황", "평가 결과", "최종 점수", "핵심"]:
+            ws[f"A{row_idx}"].font = Font(size=10, bold=True, color="2F5496")
+        else:
+            ws[f"A{row_idx}"].font = Font(size=9, color="595959")
+        ws[f"B{row_idx}"].font = Font(size=9, color="595959")
+        ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws[f"B{row_idx}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws.row_dimensions[row_idx].height = 18 if r[0] else 8
+        row_idx += 1
+    
+    ws.append([""])  # 빈 줄
+    row_idx += 1
+    
+    # 예시 3: [X,X,X,X]
+    ws.append(["🔹 예시 3: [DB=X, COMMUNICATE=X, ACTION=X, ENV_ASSERTION=X] - 조기 종료"])
+    ws.merge_cells(f"A{row_idx}:H{row_idx}")
+    ws[f"A{row_idx}"].font = Font(size=11, bold=True, color="2F5496")
+    ws[f"A{row_idx}"].fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+    ws.row_dimensions[row_idx].height = 22
+    row_idx += 1
+    
+    example3 = [
+        ["상황", "모델이 tool_calls를 하나도 안 내거나, 에러가 나서 중단됨. (Termination=user_stop, max_steps 등)"],
+        ["모델 호출", "(없음 또는 불완전)"],
+        ["", ""],
+        ["평가 결과", ""],
+        ["  RB_DB", "None (채점 기준 없음)"],
+        ["  RB_COMMUNICATE", "None"],
+        ["  RB_ACTION", "None"],
+        ["  RB_ENV_ASSERTION", "None"],
+        ["", ""],
+        ["최종 점수", "Reward = 1.0 (기본값) → PASS ❓"],
+        ["핵심", "채점 불가한 케이스. Pass/Fail 구분 불가능. 실전에서는 FAIL로 봐야 함."],
+    ]
+    
+    for r in example3:
+        ws.append(r)
+        ws.merge_cells(f"A{row_idx}:A{row_idx}") if r[0] else None
+        ws.merge_cells(f"B{row_idx}:H{row_idx}")
+        if r[0] in ["상황", "평가 결과", "최종 점수", "핵심"]:
+            ws[f"A{row_idx}"].font = Font(size=10, bold=True, color="2F5496")
+        else:
+            ws[f"A{row_idx}"].font = Font(size=9, color="595959")
+        ws[f"B{row_idx}"].font = Font(size=9, color="595959")
+        ws[f"A{row_idx}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws[f"B{row_idx}"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws.row_dimensions[row_idx].height = 18 if r[0] else 8
         row_idx += 1
     
     ws.append([""])  # 빈 줄
@@ -1392,13 +1580,15 @@ def create_guide_sheet(wb, styles):
         ws.row_dimensions[row_idx].height = 25
         row_idx += 1
     
-    # Column widths
-    ws.column_dimensions["A"].width = 25
-    ws.column_dimensions["B"].width = 35
-    ws.column_dimensions["C"].width = 35
-    ws.column_dimensions["D"].width = 20
-    ws.column_dimensions["E"].width = 20
-    ws.column_dimensions["F"].width = 20
+    # Column widths (조정: 조합표를 위해 더 넓게)
+    ws.column_dimensions["A"].width = 12   # DB
+    ws.column_dimensions["B"].width = 14   # COMMUNICATE
+    ws.column_dimensions["C"].width = 10   # ACTION
+    ws.column_dimensions["D"].width = 10   # ENV_ASSERTION
+    ws.column_dimensions["E"].width = 12   # 빈도
+    ws.column_dimensions["F"].width = 12   # 주 도메인
+    ws.column_dimensions["G"].width = 32   # 점수 계산 공식
+    ws.column_dimensions["H"].width = 50   # 언제 이 조합을 쓰나?
     
     return ws
 
