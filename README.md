@@ -1,6 +1,6 @@
-# 🚀 mcp-llm-bm-v3
+# 🚀 TAU2-Bench (OpenRouter)
 
-> **τ²-bench 기반 LLM 에이전트 벤치마크** - OpenRouter를 통한 5개 모델 평가 파이프라인
+> **τ²-bench 기반 Multi-Turn Tool-Use 에이전트 벤치마크** - 5개 LLM 모델 평가 파이프라인
 
 ---
 
