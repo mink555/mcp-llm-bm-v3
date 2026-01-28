@@ -1669,21 +1669,20 @@ def create_runs_sheet(wb, runs, styles):
         "GT Actions (상세)", # G (정답 레시피: 이 툴들을 호출해야 함)
         "GT 필수툴",         # H (간단 요약: 툴 이름만)
         "GT env_assertions", # I (환경 조건: telecom에서 주로 사용)
-        "GT DB필요",         # J (DB 채점 여부: DB가 basis에 있으면 Y)
-        "GT COMMUNICATE필요", # K (안내 채점 여부: COMMUNICATE가 basis에 있으면 Y)
+        "GT NL Assertions",  # J (자연어 평가 기준: 해야 할 것)
         
         # 4. 모델 행동 - 모델이 뭘 했는가
-        "CalledTools",       # L (모델이 실제로 호출한 툴)
-        "MissingTools",      # M (누락된 필수 툴 = 보통 FAIL 원인)
+        "CalledTools",       # K (모델이 실제로 호출한 툴)
+        "MissingTools",      # L (누락된 필수 툴 = 보통 FAIL 원인)
         
         # 5. 세부 점수 - 왜 이 점수인가
-        "RB_DB",             # N (DB 상태가 정답과 같은가?)
-        "RB_COMMUNICATE",    # O (사용자에게 제대로 안내했나?)
-        "RB_ACTION",         # P (필수 행동을 다 했나?)
-        "RB_ENV_ASSERTION",  # Q (시스템 설정이 맞나? telecom)
+        "RB_DB",             # M (DB 상태가 정답과 같은가?)
+        "RB_COMMUNICATE",    # N (사용자에게 제대로 안내했나?)
+        "RB_ACTION",         # O (필수 행동을 다 했나?)
+        "RB_ENV_ASSERTION",  # P (시스템 설정이 맞나? telecom)
         
         # 6. 종료
-        "Termination",       # R (종료 사유: user_stop 등)
+        "Termination",       # Q (종료 사유: user_stop 등)
     ]
     hidden_headers = [
         "RunID",
@@ -1749,9 +1748,8 @@ def create_runs_sheet(wb, runs, styles):
         gt_actions_detail_str = run.get("GTActionsDetail", "(없음)")
         gt_env_assertions_list = run.get("GTEnvAssertions") or []
         gt_env_assertions_str = "\n".join(gt_env_assertions_list) if gt_env_assertions_list else ""
-        # GT DB/COMMUNICATE 필요 여부 (RewardBasis에 포함되어 있는지)
-        gt_db_needed = "Y" if "DB" in reward_basis_list else "N"
-        gt_comm_needed = "Y" if "COMMUNICATE" in reward_basis_list else "N"
+        gt_nl_assertions_list = run.get("GTNLAssertions") or []
+        gt_nl_assertions_str = "\n".join(gt_nl_assertions_list) if gt_nl_assertions_list else ""
         called_tools_str = ", ".join(called_tools) if called_tools else ""
         missing_tools_str = ", ".join(missing_tools) if missing_tools else ""
 
@@ -1768,8 +1766,7 @@ def create_runs_sheet(wb, runs, styles):
             gt_actions_detail_str,  # GT Actions (상세)
             gt_required_tools,      # GT 필수툴
             gt_env_assertions_str,  # GT env_assertions
-            gt_db_needed,           # GT DB필요
-            gt_comm_needed,         # GT COMMUNICATE필요
+            gt_nl_assertions_str,   # GT NL Assertions
             # 4. 모델 행동
             called_tools_str,
             missing_tools_str,
@@ -1877,18 +1874,17 @@ def create_runs_sheet(wb, runs, styles):
         "G":35,   # GT Actions (상세)
         "H":22,   # GT 필수툴
         "I":30,   # GT env_assertions
-        "J":10,   # GT DB필요
-        "K":16,   # GT COMMUNICATE필요
+        "J":40,   # GT NL Assertions
         # 4. 모델 행동
-        "L":24,   # CalledTools
-        "M":22,   # MissingTools
+        "K":24,   # CalledTools
+        "L":22,   # MissingTools
         # 5. 세부 점수
-        "N":10,   # RB_DB
-        "O":14,   # RB_COMMUNICATE
-        "P":10,   # RB_ACTION
-        "Q":14,   # RB_ENV_ASSERTION
+        "M":10,   # RB_DB
+        "N":14,   # RB_COMMUNICATE
+        "O":10,   # RB_ACTION
+        "P":14,   # RB_ENV_ASSERTION
         # 6. 종료
-        "R":12,   # Termination
+        "Q":12,   # Termination
     }
     for k,v in widths.items():
         ws.column_dimensions[k].width = v
@@ -2559,11 +2555,12 @@ def generate_report(
             task_order_map[(domain, tid)] = idx_t
             crit = (t.get("evaluation_criteria") or {})
             actions = crit.get("actions") or []
-            # 원본 GT: actions + env_assertions(원문 그대로)
+            # 원본 GT: actions + env_assertions + nl_assertions(원문 그대로)
             gt_raw = json.dumps(
                 {
                     "actions": actions,
                     "env_assertions": (crit.get("env_assertions") or []),
+                    "nl_assertions": (crit.get("nl_assertions") or []),
                 },
                 ensure_ascii=False,
             )
@@ -2725,9 +2722,10 @@ def generate_report(
             user_request_raw = user_scenario_raw or first_user
             gt_raw = meta.get("gt_raw", "")
             gt_summary = gt_map.get((domain, str(task_id)), "N/A")
-            # 필수 툴 리스트(GT) + GT Actions 상세 정보
+            # 필수 툴 리스트(GT) + GT Actions 상세 정보 + NL Assertions
             required_tools: list[str] = []
             gt_actions_detail: list[str] = []
+            gt_nl_assertions: list[str] = []
             try:
                 gt_obj = json.loads(gt_raw) if gt_raw else {}
                 if isinstance(gt_obj, dict):
@@ -2742,9 +2740,12 @@ def generate_report(
                                 gt_actions_detail.append(f"{name}({args_str})")
                             else:
                                 gt_actions_detail.append(f"{name}()")
+                    # NL Assertions 추출
+                    gt_nl_assertions = gt_obj.get("nl_assertions") or []
             except Exception:
                 required_tools = []
                 gt_actions_detail = []
+                gt_nl_assertions = []
             gt_actions_detail_str = "\n".join(gt_actions_detail) if gt_actions_detail else "(없음)"
             called_tools = sorted({n for n in tool_names if n})
             missing_tools = sorted(set(required_tools) - set(called_tools))
@@ -2793,6 +2794,7 @@ def generate_report(
                     "GTSummary": gt_summary,
                     "GTActionsDetail": gt_actions_detail_str,
                     "GTEnvAssertions": gt_env_assertions,
+                    "GTNLAssertions": gt_nl_assertions,
                     "AgentFinalRaw": agent_final,
                     "ActionChecksRaw": json.dumps(action_checks, ensure_ascii=False),
                     "ActionMismatchCount": mismatch_count,
