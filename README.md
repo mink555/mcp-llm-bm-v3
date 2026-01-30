@@ -160,6 +160,134 @@ cd tau2-bench
 
 ---
 
+## 📦 데이터셋 구조
+
+### 디렉토리 레이아웃
+
+```
+data/tau2/
+├── domains/
+│   ├── retail/
+│   │   ├── tasks.json          ← 평가 태스크 (115개+)
+│   │   ├── db.json             ← 상품/주문/유저 DB (83K+ lines)
+│   │   ├── policy.md           ← 에이전트 정책 문서
+│   │   └── split_tasks.json    ← base/test 분할
+│   │
+│   ├── airline/
+│   │   ├── tasks.json          ← 평가 태스크
+│   │   ├── db.json             ← 예약/비행편 DB
+│   │   ├── policy.md           ← 항공 정책 문서
+│   │   └── split_tasks.json
+│   │
+│   └── telecom/
+│       ├── tasks.json          ← 기본 태스크
+│       ├── tasks_full.json     ← 전체 태스크
+│       ├── main_policy.md      ← 메인 정책
+│       ├── tech_support_*.md   ← 기술 지원 워크플로우
+│       ├── db.toml             ← 계정 DB
+│       └── workflows/          ← 문제해결 플로우차트
+│
+├── user_simulator/
+│   └── simulation_guidelines.md    ← 시뮬레이션 가이드라인
+│
+└── results/final/                  ← 공식 결과 JSON
+```
+
+### 도메인별 데이터 비교
+
+| 항목 | Retail | Airline | Telecom |
+|------|--------|---------|---------|
+| **DB 형식** | JSON | JSON | TOML |
+| **주요 엔티티** | products, orders, users | flights, reservations, users | accounts, lines, plans |
+| **정책 문서** | 1개 (policy.md) | 1개 (policy.md) | 3개+ (main + workflow) |
+| **워크플로우** | 없음 | 없음 | DOT 플로우차트 |
+| **난이도** | 중 | 중 | **상** (상태 관리 복잡) |
+
+### Task JSON 구조
+
+```json
+{
+  "id": "0",
+  "description": {
+    "purpose": "테스트 목적",
+    "relevant_policies": "관련 정책",
+    "notes": "추가 노트"
+  },
+  "user_scenario": {
+    "persona": null,
+    "instructions": {
+      "task_instructions": "세부 행동 지침",
+      "domain": "retail | airline | telecom",
+      "reason_for_call": "고객이 전화한 이유",
+      "known_info": "고객이 알고 있는 정보",
+      "unknown_info": "고객이 모르는 정보"
+    }
+  },
+  "initial_state": null,
+  "evaluation_criteria": {
+    "actions": [...],           // 예상 Tool 호출 목록
+    "communicate_info": [...],  // 전달해야 할 정보
+    "env_assertions": [...],    // 환경 상태 검증
+    "nl_assertions": [...]      // 자연어 검증
+  }
+}
+```
+
+### User Instructions 필드 설명
+
+| 필드 | 용도 | 예시 |
+|------|------|------|
+| `task_instructions` | User Simulator 행동 지침 | `"Agent가 취소 불가하면 보험 얘기 언급"` |
+| `domain` | 도메인 지정 | `"retail"` |
+| `reason_for_call` | 고객 요청 내용 | `"주문 #W2378156 교환하고 싶어요"` |
+| `known_info` | 제공 가능 정보 | `"Yusuf Rossi, zip 19122"` |
+| `unknown_info` | 모르는 정보 | `"이메일 기억 안 남"` |
+
+### Evaluation Criteria 필드 설명
+
+| 평가 항목 | JSON 필드 | Pass 기준 |
+|-----------|-----------|-----------|
+| **DB** | (자동 비교) | Gold DB Hash == Predicted DB Hash |
+| **ACTION** | `actions` | 모든 GT Action이 예측에 존재 |
+| **COMMUNICATE** | `communicate_info` | GT 문자열이 응답에 포함 |
+| **ENV_ASSERTION** | `env_assertions` | 환경 조건 충족 |
+| **NL_ASSERTION** | `nl_assertions` | 자연어 조건 충족 (LLM 판정) |
+
+### Trajectory (실행 결과) JSON 구조
+
+```json
+{
+  "timestamp": "2025-06-05T15:33:58.840015",
+  "info": {
+    "num_trials": 4,
+    "max_steps": 200,
+    "user_info": { "llm": "gpt-4.1-2025-04-14", ... },
+    "agent_info": { "llm": "gpt-4.1-2025-04-14", ... },
+    "environment_info": { "domain_name": "retail", "policy": "...", ... }
+  },
+  "tasks": [
+    {
+      "id": "0",
+      "user_scenario": { ... },
+      "evaluation_criteria": { ... },
+      "trials": [
+        {
+          "messages": [...],     // 전체 대화 기록
+          "reward": 1.0,         // 최종 점수
+          "reward_breakdown": {  // 항목별 점수
+            "DB": 1.0,
+            "COMMUNICATE": 1.0,
+            "ACTION": 1.0
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
 ## 🔄 평가 프로세스
 
 ### 시스템 아키텍처 흐름도
